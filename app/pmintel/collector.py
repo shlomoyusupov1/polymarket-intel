@@ -70,17 +70,29 @@ def collect_orderbooks(conn, clob: Clob, records: list[dict], now: datetime,
     return stats
 
 
-def sync_recently_closed(conn, gamma: Gamma, days: int = 30) -> int:
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+def sync_recently_closed(conn, gamma: Gamma, days: int = 7, min_volume: float = 1000) -> int:
+    """Capture resolutions of recently closed markets.
+
+    Production (2026-10-16): >500k markets closed in 30 days (sports micro-markets), so this
+    walks one-day windows and only markets with volume >= min_volume (both filters verified
+    to be honoured by /markets/keyset)."""
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    n = 0
     with db.job_run(conn, "sync_closed") as run:
-        recs = {}
-        for raw in gamma.iter_markets(closed="true", end_date_min=since):
-            if "id" in raw:
-                r = normalize_market(raw)
-                recs[r["id"]] = r
-        db.upsert_markets(conn, list(recs.values()))
-        run["items"] = len(recs)
-    return len(recs)
+        for d in range(days, -2, -1):
+            lo, hi = today - timedelta(days=d), today - timedelta(days=d - 1)
+            recs = {}
+            for raw in gamma.iter_markets(closed="true", volume_num_min=min_volume,
+                                          end_date_min=lo.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                          end_date_max=hi.strftime("%Y-%m-%dT%H:%M:%SZ")):
+                if "id" in raw:
+                    r = normalize_market(raw)
+                    if (r["volume"] or 0) >= min_volume:
+                        recs[r["id"]] = r
+            db.upsert_markets(conn, list(recs.values()))
+            n += len(recs)
+        run["items"] = n
+    return n
 
 
 def main() -> None:

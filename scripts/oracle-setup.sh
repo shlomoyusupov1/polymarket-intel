@@ -26,6 +26,8 @@ for port in 80 443; do
   fi
 done
 sudo netfilter-persistent save
+# Oracle images run rpcbind (port 111); we don't use NFS
+sudo systemctl disable --now rpcbind rpcbind.socket 2>/dev/null || true
 
 echo "==> Preparing .env"
 cd "$(dirname "$0")/.."

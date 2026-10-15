@@ -67,8 +67,26 @@ Twelve Data monthly closes, VOO and BND, 2016-10 → 2026-09, **price only (no d
 | 80/20 | $12,000 | $20,987 | −25.3% | −18.7% |
 | 60/40 | $12,000 | $17,758 | −23.0% | −17.8% |
 
+**Total return (verified on the server, Yahoo adjusted closes, same method):**
+
+| Mix | Price only | Total return | Max drawdown (TR) |
+|---|---:|---:|---:|
+| 100% VOO | $24,785 | **$27,136** (+126.1%) | −26.9% |
+| 80/20 | $20,987 | **$23,299** (+94.2%) | −24.8% |
+| 60/40 | $17,758 | **$19,988** (+66.6%) | −22.5% |
+
+The price-only column was reproduced exactly from an independent source (Twelve Data vs Yahoo).
+Bonds improved the worst drawdown by ~2 points per 20% allocation while costing ~$3.8k per 20% over
+this decade — a single, unusually bond-unfriendly decade, so not a general conclusion.
+
 Presented as history and an opinion, not advice. Proposed split of $100: 70 index / 20 bonds /
 10 active trading / 0 Polymarket (paper only until research shows a post-cost edge).
+
+## 3a. Production evidence (run 1) — see `docs/PRODUCTION_EVIDENCE.md`
+
+HTTPS/auth/TLS verified from the public address; containers and API healthy; DB 291,527 market rows.
+Real defects found and fixed: `sync_closed` (>500k markets closed in 30 days), a false-positive port
+check, a restore check that tested an empty early dump. Port 111 (rpcbind) disabled going forward.
 
 ## 3b. Round 2 — implemented 2026-10-16, awaiting the server run
 
