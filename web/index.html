@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0f1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Polymarket Intelligence</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="dot" id="health-dot"></span>Polymarket Intelligence</div>
+  <div class="sub" id="freshness">טוען…</div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-tab="overview">סקירה</button>
+  <button class="tab" data-tab="scanner">סורק</button>
+  <button class="tab" data-tab="research">מחקר</button>
+  <button class="tab" data-tab="system">מערכת</button>
+</nav>
+
+<main>
+  <section id="overview" class="panel active">
+    <div class="kpis" id="kpis"></div>
+    <h2>תנועות חדות ב-24 שעות</h2>
+    <p class="note">מבוסס רק על snapshots שהמערכת אספה בעצמה. ריק עד שנצבר יום של נתונים.</p>
+    <div id="movers" class="list"></div>
+  </section>
+
+  <section id="scanner" class="panel">
+    <div class="filters">
+      <input id="search" type="search" placeholder="חיפוש שוק…" autocomplete="off">
+      <select id="sort">
+        <option value="volume_24h">נפח 24ש׳</option>
+        <option value="liquidity">נזילות</option>
+        <option value="volume">נפח כולל</option>
+        <option value="end_date">סגירה קרובה</option>
+      </select>
+      <select id="minliq">
+        <option value="0">כל הנזילות</option>
+        <option value="1000">נזילות ≥ $1K</option>
+        <option value="10000" selected>נזילות ≥ $10K</option>
+        <option value="100000">נזילות ≥ $100K</option>
+      </select>
+    </div>
+    <div id="markets" class="list"></div>
+    <button id="more" class="ghost">טען עוד</button>
+  </section>
+
+  <section id="research" class="panel">
+    <div id="research-body"></div>
+  </section>
+
+  <section id="system" class="panel">
+    <div id="system-body"></div>
+  </section>
+</main>
+
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-card">
+    <button class="close" id="sheet-close" aria-label="סגור">✕</button>
+    <div id="sheet-body"></div>
+  </div>
+</div>
+
+<footer class="foot">מחקר בלבד · ללא ארנק · ללא ביצוע עסקאות · מחיר שוק ≠ תחזית עצמאית</footer>
+<script src="app.js"></script>
+</body>
+</html>

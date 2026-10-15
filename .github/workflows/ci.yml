@@ -1,0 +1,29 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: pmintel
+          POSTGRES_PASSWORD: pmintel
+          POSTGRES_DB: pmintel
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pmintel" --health-interval 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r app/requirements.txt pytest
+      - run: cd app && python -m pytest -q
+        env:
+          PMINTEL_TEST_DB: postgresql://pmintel:pmintel@localhost:5432/pmintel
+      - name: compose config
+        run: |
+          cp .env.example .env
+          sed -i 's/^BASIC_AUTH_HASH=$/BASIC_AUTH_HASH=x/' .env
+          docker compose config -q
