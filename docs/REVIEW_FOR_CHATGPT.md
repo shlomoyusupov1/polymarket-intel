@@ -70,6 +70,20 @@ Twelve Data monthly closes, VOO and BND, 2016-10 → 2026-09, **price only (no d
 Presented as history and an opinion, not advice. Proposed split of $100: 70 index / 20 bonds /
 10 active trading / 0 Polymarket (paper only until research shows a post-cost edge).
 
+## 3b. Round 2 — implemented 2026-10-16, awaiting the server run
+
+Code is in `main`; numbers below get filled only from the server outputs (nothing estimated here).
+
+| Request | Implementation | Status |
+|---|---|---|
+| Market universe audit | `pmintel.report` §1: total / closed / open / accepting orders / order book enabled / *tradable* + liquidity and 24h-volume buckets. New stored fields: `acceptingOrders`, `enableOrderBook`, `archived`, `negRiskMarketID`, `negRiskOther`, `feesEnabled`, outcome prices, Gamma's 1d/1w change | code + tests ✅, server run ⏳ |
+| Order-book retention | raw depth up to 50 levels/side with `token_id`, `ts`, `fetched_at`; freshness, 24h validity and coverage in the report and evidence | ✅ / ⏳ |
+| Structural scanner | negRisk sets split into mathematical (\|Σmid−1\|>2%) → theoretical (Σ best ask < 1) → executable (live books walked for every leg at 10 and 100 shares; blockers: catch-all *Other* leg, fees enabled, leg not accepting orders, thin book). Partial-fill, resolution and settlement-delay risks listed, not modelled | ✅ / ⏳ |
+| Collector load | full 290k scan every 6 h (lifecycle + deactivation); 15-min cycles scan only markets with liquidity ≥ $1K | ✅ / ⏳ |
+| ETF protocol | original holdout **stays failed** (3 missed sessions). Diagnostic numbers above are labelled as such. A new, separately pre-registered study will run on the Oracle VM (cron, not Actions), with sizing that can actually trade; nothing in the original artifacts is modified | design pending |
+| VOO/BND total return | Twelve Data dividends need a paid plan (not purchased). `scripts/total_return.py` uses Yahoo adjusted closes in a throwaway container, same method as the price-only run, and prints both for comparison | ✅ / ⏳ |
+| Production evidence | `scripts/evidence.sh`: HTTPS via public address (status codes, certificate issuer/expiry), containers, API health, DB counts and size, job runs/errors 24h, order-book freshness per hour, security check incl. backup restore into a scratch DB | ✅ / ⏳ |
+
 ## 4. What I'd like challenged
 1. Keyset `after_cursor` name was inferred from a third-party Go client; production scan passed, but
    please confirm against official docs.

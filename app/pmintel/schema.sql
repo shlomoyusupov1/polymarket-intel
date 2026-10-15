@@ -77,6 +77,20 @@ CREATE TABLE IF NOT EXISTS research_reports (
     result     jsonb
 );
 
+-- Columns added after v0.1 (idempotent upgrades of existing deployments)
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS outcome_prices     jsonb;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS accepting_orders   boolean;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS enable_order_book  boolean;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS archived           boolean;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS neg_risk_market_id text;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS fees_enabled       boolean;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS one_day_change     double precision;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS one_week_change    double precision;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS volume_1wk         double precision;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS group_item_title   text;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS neg_risk_other     boolean;
+CREATE INDEX IF NOT EXISTS markets_negrisk_idx ON markets (neg_risk_market_id) WHERE neg_risk_market_id IS NOT NULL;
+
 -- Live order-book observations (reference outcome token). Only what we observed.
 CREATE TABLE IF NOT EXISTS orderbooks (
     ts             timestamptz NOT NULL,

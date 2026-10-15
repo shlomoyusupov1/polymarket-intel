@@ -20,6 +20,8 @@ SNAPSHOT_MIN_LIQUIDITY = _float("SNAPSHOT_MIN_LIQUIDITY", 1000)
 RESEARCH_HOUR_UTC = _int("RESEARCH_HOUR_UTC", 3)
 # Live order books for the N most-traded markets each cycle (executable prices + depth)
 ORDERBOOK_TOP_N = _int("ORDERBOOK_TOP_N", 50)
+# Full universe scan (all ~290k markets, ~5 min) only every N hours; other cycles scan liquid markets only.
+FULL_SCAN_EVERY_H = _float("FULL_SCAN_EVERY_H", 6)
 
 # Backfill
 BACKFILL_SINCE = os.environ.get("BACKFILL_SINCE", "2024-01-01")

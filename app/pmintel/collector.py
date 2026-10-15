@@ -15,19 +15,26 @@ from .sources import Clob, Gamma
 log = logging.getLogger("collector")
 
 
-def collect_once(conn, gamma: Gamma, now: datetime | None = None) -> dict:
+def collect_once(conn, gamma: Gamma, now: datetime | None = None, full: bool = True) -> dict:
+    """full=True: whole open universe + lifecycle (deactivate vanished markets).
+    full=False: liquid markets only (fast cycle); never deactivates anything."""
     now = now or datetime.now(timezone.utc)
     scan_started = conn.execute("SELECT now()").fetchone()[0]
-    with db.job_run(conn, "collect") as run:
+    filters = {"active": "true", "closed": "false"}
+    if not full:
+        filters["liquidity_num_min"] = config.SNAPSHOT_MIN_LIQUIDITY
+    with db.job_run(conn, "collect_full" if full else "collect") as run:
         seen: dict[str, dict] = {}
-        for raw in gamma.iter_markets(active="true", closed="false"):
+        for raw in gamma.iter_markets(**filters):
             if "id" not in raw:
                 continue
             rec = normalize_market(raw)
+            if not full and (rec["liquidity"] or 0) < config.SNAPSHOT_MIN_LIQUIDITY:
+                continue  # don't trust the server-side filter blindly
             seen[rec["id"]] = rec  # dedupe across pages
         records = list(seen.values())
         db.upsert_markets(conn, records)
-        if records:  # never deactivate everything because of an empty/failed scan
+        if full and records:  # never deactivate everything because of an empty/failed scan
             conn.execute("UPDATE markets SET active = false WHERE active AND NOT closed AND updated_at < %s",
                          (scan_started,))
         liquid = [r for r in records if (r["liquidity"] or 0) >= config.SNAPSHOT_MIN_LIQUIDITY
@@ -82,10 +89,14 @@ def main() -> None:
     db.init_schema(conn)
     gamma, clob = Gamma(), Clob()
     last_daily = None
+    last_full = 0.0
     while True:
         started = time.monotonic()
         try:
-            out = collect_once(conn, gamma)
+            full = started - last_full >= config.FULL_SCAN_EVERY_H * 3600 or last_full == 0.0
+            out = collect_once(conn, gamma, full=full)
+            if full:
+                last_full = started
             collect_orderbooks(conn, clob, out["records"], datetime.now(timezone.utc))
         except Exception:
             log.exception("collect failed")

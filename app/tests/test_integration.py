@@ -123,7 +123,7 @@ def test_full_pipeline(conn, monkeypatch):
     with TestClient(api.app) as tc:
         h = tc.get("/api/health").json()
         assert h["counts"]["open_markets"] == 4 and h["counts"]["resolved_markets"] == 60
-        assert {j["job"] for j in h["jobs"]} >= {"collect", "backfill", "research"}
+        assert {j["job"] for j in h["jobs"]} >= {"collect_full", "backfill", "research"}
         ms = tc.get("/api/markets", params={"min_liquidity": 1000, "sort": "liquidity"}).json()
         assert [m["id"] for m in ms] == ["1", "2", "3"] and all(m["decision"] == "WAIT" for m in ms)
         assert tc.get("/api/markets", params={"search": "market 2"}).json()[0]["id"] == "2"

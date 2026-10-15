@@ -56,5 +56,6 @@ def summarize(book: dict) -> dict | None:
         "buy_vwap_1000": vwap_for_notional(asks, 1000),
         "sell_vwap_100": vwap_for_notional(bids, 100),
         "sell_vwap_1000": vwap_for_notional(bids, 1000),
-        "levels": {"bids": bids[:10], "asks": asks[:10]},
+        # raw depth kept for later research (up to 50 levels per side)
+        "levels": {"bids": bids[:50], "asks": asks[:50]},
     }

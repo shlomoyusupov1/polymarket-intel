@@ -32,6 +32,14 @@ def _float(v):
         return None
 
 
+def _bool(v):
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("true", "1", "yes")
+
+
 def _ts(v):
     if not v:
         return None
@@ -105,4 +113,17 @@ def normalize_market(m: dict) -> dict:
         "resolution_source": m.get("resolutionSource"),
         "description": m.get("description"),
         "url": f"https://polymarket.com/event/{event_slug or slug}" if (event_slug or slug) else None,
+        "outcome_prices": prices if len(prices) == len(outcomes) else None,
+        "accepting_orders": _bool(m.get("acceptingOrders")),
+        "enable_order_book": _bool(m.get("enableOrderBook")),
+        "archived": _bool(m.get("archived")),
+        "neg_risk_market_id": m.get("negRiskMarketID") or None,
+        "fees_enabled": _bool(m.get("feesEnabled")),
+        # Polymarket's own reported changes of the first outcome's price (source: Gamma)
+        "one_day_change": _float(m.get("oneDayPriceChange")) if first else None,
+        "one_week_change": _float(m.get("oneWeekPriceChange")) if first else None,
+        "volume_1wk": _float(m.get("volume1wk")),
+        "group_item_title": m.get("groupItemTitle") or None,
+        # the catch-all "Other" leg of an augmented negRisk event: its presence means new outcomes can appear
+        "neg_risk_other": _bool(m.get("negRiskOther")),
     }

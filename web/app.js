@@ -225,7 +225,7 @@ loaders.research = async () => {
 };
 
 // ---------- system ----------
-const JOBS = { orderbooks: "ספרי פקודות", collect: "איסוף חי", sync_closed: "סנכרון שווקים שנסגרו", backfill: "Backfill היסטורי", research: "דוח מחקר" };
+const JOBS = { orderbooks: "ספרי פקודות", collect: "איסוף חי (נזילים)", collect_full: "סריקה מלאה", sync_closed: "סנכרון שווקים שנסגרו", backfill: "Backfill היסטורי", research: "דוח מחקר" };
 loaders.system = async () => {
   const box = $("system-body");
   try {

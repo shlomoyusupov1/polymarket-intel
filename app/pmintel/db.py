@@ -14,7 +14,9 @@ MARKET_COLS = [
     "token_ids", "ref_index", "ref_outcome", "ref_price", "best_bid", "best_ask", "spread",
     "volume", "volume_24h", "liquidity", "start_date", "end_date", "closed_time",
     "active", "closed", "neg_risk", "resolution_status", "resolved_outcome", "resolution_source",
-    "description", "url",
+    "description", "url", "outcome_prices", "accepting_orders", "enable_order_book", "archived",
+    "neg_risk_market_id", "fees_enabled", "one_day_change", "one_week_change", "volume_1wk",
+    "group_item_title", "neg_risk_other",
 ]
 
 SNAP_COLS = ["ref_price", "best_bid", "best_ask", "spread", "volume", "volume_24h", "liquidity"]
@@ -38,7 +40,7 @@ def _adapt(rec: dict) -> list:
     out = []
     for c in MARKET_COLS:
         v = rec.get(c)
-        out.append(Jsonb(v) if c in ("outcomes", "token_ids") else v)
+        out.append(Jsonb(v) if c in ("outcomes", "token_ids", "outcome_prices") and v is not None else v)
     return out
 
 
