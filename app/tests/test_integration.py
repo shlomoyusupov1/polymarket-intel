@@ -140,5 +140,20 @@ def test_full_pipeline(conn, monkeypatch):
         assert r["result"]["24"]["calibration"]["n"] == 60
         ov = tc.get("/api/overview").json()
         assert ov["stats"]["open_markets"] == 4
-        mv = ov["movers"]
+        mv = ov["own_movers"]
         assert mv[0]["id"] == "1" and abs(mv[0]["change"] - 0.15) < 1e-9
+        assert ov["opportunities"]["statistically_supported"] == []
+        assert {"changed", "attention", "freshness"} <= set(ov)
+        # live endpoints fail honestly (502) when the upstream is unreachable in tests
+        monkeypatch.setattr(api, "_clob", Clob(api_of(lambda r: httpx.Response(503))))
+        api._cache.clear()
+        assert tc.get("/api/markets/1/history?range=1w").status_code == 502
+        assert tc.get("/api/markets/1/book").status_code == 502
+        monkeypatch.setattr(api, "_clob", Clob(api_of(lambda r: httpx.Response(200, json=(
+            {"history": [{"t": 1, "p": 0.4}, {"t": 2, "p": 0.5}]} if r.url.path == "/prices-history"
+            else {"bids": [{"price": "0.4", "size": "10"}], "asks": [{"price": "0.5", "size": "10"}]})))))
+        api._cache.clear()
+        assert tc.get("/api/markets/1/history?range=1d").json()["points"][-1]["p"] == 0.5
+        b = tc.get("/api/markets/1/book").json()
+        assert b["valid"] and b["best_ask"] == 0.5
+        assert tc.get("/api/markets/nope/book").status_code == 404

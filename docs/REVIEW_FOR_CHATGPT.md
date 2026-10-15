@@ -102,6 +102,13 @@ Code is in `main`; numbers below get filled only from the server outputs (nothin
 | VOO/BND total return | Twelve Data dividends need a paid plan (not purchased). `scripts/total_return.py` uses Yahoo adjusted closes in a throwaway container, same method as the price-only run, and prints both for comparison | ✅ / ⏳ |
 | Production evidence | `scripts/evidence.sh`: HTTPS via public address (status codes, certificate issuer/expiry), containers, API health, DB counts and size, job runs/errors 24h, order-book freshness per hour, security check incl. backup restore into a scratch DB | ✅ / ⏳ |
 
+## 3c. UI redesign milestone 1 — see `docs/UI_REDESIGN.md`
+
+Audit + implementation of the shell, Command Center, Market Explorer, Market Detail, Opportunity
+Scanner, Research Lab, System Health; honest "not active" Portfolio/Alerts. Live CLOB history and book
+endpoints. Verified with Playwright on desktop and iPhone sizes against a `[TEST]`-labelled local stack
+(screenshots in `docs/screenshots/`); production screenshots pending the next deploy.
+
 ## 4. What I'd like challenged
 1. Keyset `after_cursor` name was inferred from a third-party Go client; production scan passed, but
    please confirm against official docs.

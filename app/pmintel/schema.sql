@@ -89,6 +89,7 @@ ALTER TABLE markets ADD COLUMN IF NOT EXISTS one_week_change    double precision
 ALTER TABLE markets ADD COLUMN IF NOT EXISTS volume_1wk         double precision;
 ALTER TABLE markets ADD COLUMN IF NOT EXISTS group_item_title   text;
 ALTER TABLE markets ADD COLUMN IF NOT EXISTS neg_risk_other     boolean;
+CREATE INDEX IF NOT EXISTS markets_vol24_idx ON markets (volume_24h DESC NULLS LAST) WHERE active AND NOT closed;
 CREATE INDEX IF NOT EXISTS markets_negrisk_idx ON markets (neg_risk_market_id) WHERE neg_risk_market_id IS NOT NULL;
 
 -- Live order-book observations (reference outcome token). Only what we observed.

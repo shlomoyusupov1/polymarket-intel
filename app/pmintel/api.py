@@ -1,4 +1,6 @@
 """Read-only JSON API for the dashboard."""
+import threading
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -7,6 +9,34 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from . import config, db
+from .orderbook import summarize
+from .sources import Clob
+
+_clob: Clob | None = None
+_cache: dict = {}
+_cache_lock = threading.Lock()
+
+
+def cached(key, ttl: float, fn):
+    """Tiny in-process TTL cache for live upstream calls (per worker)."""
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and now - hit[0] < ttl:
+            return hit[1]
+    value = fn()
+    with _cache_lock:
+        if len(_cache) > 2000:
+            _cache.clear()
+        _cache[key] = (now, value)
+    return value
+
+
+def clob() -> Clob:
+    global _clob
+    if _clob is None:
+        _clob = Clob()
+    return _clob
 
 pool: ConnectionPool | None = None
 
@@ -81,24 +111,71 @@ def health():
             "counts": counts, "jobs": jobs, "last_ok": {r["job"]: r["last_ok"] for r in last_ok}}
 
 
+LIST_COLS = """id, question, category, outcomes, outcome_prices, ref_outcome, ref_price, best_bid, best_ask,
+               spread, volume, volume_24h, liquidity, end_date, url, updated_at, one_day_change,
+               accepting_orders, event_slug"""
+TRADABLE = "active AND NOT closed AND accepting_orders IS NOT FALSE AND enable_order_book IS NOT FALSE"
+
+
 @app.get("/api/overview")
 def overview():
-    stats = q("""SELECT count(*) AS open_markets,
-                        count(*) FILTER (WHERE liquidity >= %s) AS tracked_markets,
+    """Command Center: what changed, what draws attention, any supported opportunity,
+    how fresh/reliable the data is, what to investigate next."""
+    liq = config.SNAPSHOT_MIN_LIQUIDITY
+    stats = q(f"""SELECT count(*) AS open_markets,
+                        count(*) FILTER (WHERE {TRADABLE} AND liquidity >= %s) AS tradable_markets,
                         sum(volume_24h) AS volume_24h, sum(liquidity) AS liquidity,
                         max(updated_at) AS last_update
-                 FROM markets WHERE active AND NOT closed""", (config.SNAPSHOT_MIN_LIQUIDITY,))[0]
-    return {"stats": stats, "movers": movers(hours=24, limit=8)}
+                 FROM markets WHERE active AND NOT closed""", (liq,))[0]
+    # 1d change as reported by Polymarket (Gamma oneDayPriceChange of the first outcome)
+    changed = q(f"""SELECT {LIST_COLS} FROM markets
+                    WHERE {TRADABLE} AND liquidity >= 5000 AND one_day_change IS NOT NULL
+                    ORDER BY abs(one_day_change) DESC NULLS LAST LIMIT 8""")
+    attention = q(f"""SELECT {LIST_COLS} FROM markets WHERE {TRADABLE}
+                      ORDER BY volume_24h DESC NULLS LAST LIMIT 8""")
+    rep = q("""SELECT created_at, result->'structural'->'executable' AS executable,
+                      jsonb_array_length(coalesce(result->'structural'->'theoretical', '[]'::jsonb)) AS theoretical
+               FROM research_reports WHERE kind = 'research_report_v1' ORDER BY id DESC LIMIT 1""")
+    hist = q("""SELECT created_at, result FROM research_reports WHERE kind = 'historical_v1'
+                ORDER BY id DESC LIMIT 1""")
+    supported = []
+    if hist:
+        for hz, res in (hist[0]["result"] or {}).items():
+            for s in res.get("strategies", []):
+                if s.get("edge_supported"):
+                    supported.append({"horizon_h": hz, **s})
+    health_now = health()
+    return {
+        "stats": stats,
+        "changed": changed, "changed_source": "Polymarket (Gamma oneDayPriceChange)",
+        "own_movers": movers(hours=24, limit=8),
+        "attention": attention,
+        "opportunities": {
+            "structural_report_at": rep[0]["created_at"] if rep else None,
+            "structural_theoretical": rep[0]["theoretical"] if rep else None,
+            "structural_executable": len(rep[0]["executable"] or []) if rep else None,
+            "historical_report_at": hist[0]["created_at"] if hist else None,
+            "statistically_supported": supported,
+        },
+        "freshness": {"status": health_now["status"], "snapshot_lag_min": health_now["snapshot_lag_min"],
+                      "counts": health_now["counts"], "last_ok": health_now["last_ok"]},
+    }
 
 
-SORTS = {"volume_24h": "volume_24h", "liquidity": "liquidity", "volume": "volume", "end_date": "end_date"}
+SORTS = {"volume_24h": "volume_24h", "liquidity": "liquidity", "volume": "volume", "end_date": "end_date",
+         "change": "abs(one_day_change)"}
 
 
 @app.get("/api/markets")
 def markets(search: str | None = None, category: str | None = None,
             sort: str = Query("volume_24h", enum=list(SORTS)), min_liquidity: float = 0,
+            tradable: bool = True, ids: str | None = None,
             limit: int = Query(50, le=200), offset: int = 0):
-    where, params = ["active AND NOT closed"], []
+    where, params = [TRADABLE if tradable else "active AND NOT closed"], []
+    if ids:
+        id_list = [i for i in ids.split(",") if i][:200]
+        where = ["id = ANY(%s)"]
+        params.append(id_list)
     if search:
         where.append("question ILIKE %s")
         params.append(f"%{search}%")
@@ -110,8 +187,7 @@ def markets(search: str | None = None, category: str | None = None,
         params.append(min_liquidity)
     order = SORTS[sort]
     direction = "ASC" if sort == "end_date" else "DESC"
-    rows = q(f"""SELECT id, question, category, ref_outcome, ref_price, best_bid, best_ask, spread,
-                        volume, volume_24h, liquidity, end_date, url, updated_at
+    rows = q(f"""SELECT {LIST_COLS}
                  FROM markets WHERE {' AND '.join(where)}
                  ORDER BY {order} {direction} NULLS LAST LIMIT %s OFFSET %s""",
              (*params, limit, offset))
@@ -177,4 +253,58 @@ def research_latest():
 def integration_latest():
     rows = q("""SELECT id, created_at, result FROM research_reports
                 WHERE kind = 'integration' ORDER BY id DESC LIMIT 1""")
+    return rows[0] if rows else None
+
+
+HISTORY_RANGES = {"1d": ("1d", 5), "1w": ("1w", 60), "1m": ("1m", 240), "max": ("max", 1440)}
+
+
+def _market_token(market_id: str) -> tuple[dict, str]:
+    rows = q("SELECT id, token_ids, ref_index, ref_outcome FROM markets WHERE id = %s", (market_id,))
+    if not rows:
+        raise HTTPException(404, "market not found")
+    m = rows[0]
+    if m["ref_index"] is None or m["ref_index"] >= len(m["token_ids"] or []):
+        raise HTTPException(409, "market has no order-book token")
+    return m, m["token_ids"][m["ref_index"]]
+
+
+@app.get("/api/markets/{market_id}/history")
+def market_history(market_id: str, range: str = Query("1w", enum=list(HISTORY_RANGES))):
+    """Live price history of the reference outcome from the CLOB (source: clob.polymarket.com)."""
+    m, token = _market_token(market_id)
+    interval, fidelity = HISTORY_RANGES[range]
+
+    def fetch():
+        data = clob().api.get("/prices-history", {"market": token, "interval": interval, "fidelity": fidelity}) or {}
+        return [{"t": int(p["t"]), "p": float(p["p"])} for p in data.get("history", [])
+                if isinstance(p, dict) and "t" in p and "p" in p]
+    try:
+        points = cached(("hist", token, range), 60, fetch)
+    except Exception as e:  # noqa: BLE001 - surfaced to the UI as an honest error state
+        raise HTTPException(502, f"history unavailable: {type(e).__name__}") from None
+    return {"market_id": market_id, "outcome": m["ref_outcome"], "range": range,
+            "source": "clob.polymarket.com/prices-history", "points": points}
+
+
+@app.get("/api/markets/{market_id}/book")
+def market_book(market_id: str):
+    """Live order book of the reference outcome: executable prices and depth (cached 30 s)."""
+    m, token = _market_token(market_id)
+    try:
+        raw = cached(("book", token), 30, lambda: clob().book(token))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"order book unavailable: {type(e).__name__}") from None
+    s = summarize(raw)
+    if s is None:
+        return {"market_id": market_id, "outcome": m["ref_outcome"], "empty": True,
+                "fetched_at": datetime.now(timezone.utc)}
+    return {"market_id": market_id, "outcome": m["ref_outcome"], "empty": False,
+            "fetched_at": datetime.now(timezone.utc), "source": "clob.polymarket.com/book", **s}
+
+
+@app.get("/api/report/latest")
+def report_latest():
+    rows = q("""SELECT id, created_at, result FROM research_reports
+                WHERE kind = 'research_report_v1' ORDER BY id DESC LIMIT 1""")
     return rows[0] if rows else None

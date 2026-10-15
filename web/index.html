@@ -3,70 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0a0f1a">
+<meta name="theme-color" content="#0B0F14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PM Intel">
 <title>Polymarket Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="top">
-  <div class="brand"><span class="dot" id="health-dot"></span>Polymarket Intelligence</div>
-  <div class="sub" id="freshness">טוען…</div>
-</header>
-
-<nav class="tabs" role="tablist">
-  <button class="tab active" data-tab="overview">סקירה</button>
-  <button class="tab" data-tab="scanner">סורק</button>
-  <button class="tab" data-tab="research">מחקר</button>
-  <button class="tab" data-tab="system">מערכת</button>
-</nav>
-
-<main>
-  <section id="overview" class="panel active">
-    <div class="kpis" id="kpis"></div>
-    <h2>תנועות חדות ב-24 שעות</h2>
-    <p class="note">מבוסס רק על snapshots שהמערכת אספה בעצמה. ריק עד שנצבר יום של נתונים.</p>
-    <div id="movers" class="list"></div>
-  </section>
-
-  <section id="scanner" class="panel">
-    <div class="filters">
-      <input id="search" type="search" placeholder="חיפוש שוק…" autocomplete="off">
-      <select id="sort">
-        <option value="volume_24h">נפח 24ש׳</option>
-        <option value="liquidity">נזילות</option>
-        <option value="volume">נפח כולל</option>
-        <option value="end_date">סגירה קרובה</option>
-      </select>
-      <select id="minliq">
-        <option value="0">כל הנזילות</option>
-        <option value="1000">נזילות ≥ $1K</option>
-        <option value="10000" selected>נזילות ≥ $10K</option>
-        <option value="100000">נזילות ≥ $100K</option>
-      </select>
+<a class="skip" href="#view">דלג לתוכן</a>
+<div class="shell">
+  <aside class="sidebar" aria-label="ניווט">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18 9 11l4 4 7-9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div><div class="brand-name">Polymarket Intel</div><div class="brand-sub">מחקר בלבד · ללא מסחר</div></div>
     </div>
-    <div id="markets" class="list"></div>
-    <button id="more" class="ghost">טען עוד</button>
-  </section>
-
-  <section id="research" class="panel">
-    <div id="research-body"></div>
-  </section>
-
-  <section id="system" class="panel">
-    <div id="system-body"></div>
-  </section>
-</main>
-
-<div id="sheet" class="sheet" hidden>
-  <div class="sheet-card">
-    <button class="close" id="sheet-close" aria-label="סגור">✕</button>
-    <div id="sheet-body"></div>
+    <nav id="side-nav" class="side-nav"></nav>
+    <div class="side-foot" id="side-health"></div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-title" id="page-title">מרכז הפיקוד</div>
+      <div id="top-health" class="pill" role="status"></div>
+    </header>
+    <main id="view" tabindex="-1"></main>
   </div>
 </div>
-
-<footer class="foot">מחקר בלבד · ללא ארנק · ללא ביצוע עסקאות · מחיר שוק ≠ תחזית עצמאית</footer>
+<nav class="bottom-nav" id="bottom-nav" aria-label="ניווט ראשי"></nav>
 <script src="app.js"></script>
 </body>
 </html>
