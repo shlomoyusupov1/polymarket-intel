@@ -14,6 +14,31 @@ DECISION = {"decision": "WAIT",
             "reason": "אין עדיין מודל הסתברות עצמאי מאומת — מחיר השוק אינו תחזית עצמאית"}
 
 
+def data_quality(m: dict, ob: dict | None) -> dict:
+    """Per-market data quality. A YES/NO may only ever be shown when this is 'good'."""
+    now = datetime.now(timezone.utc)
+    stale_after = config.COLLECT_INTERVAL_MIN * 3
+    issues = []
+    if m.get("ref_price") is None:
+        issues.append("אין מחיר שוק")
+    seen = m.get("updated_at")
+    if not seen or (now - seen).total_seconds() / 60 > stale_after:
+        issues.append("הנתון ישן")
+    if ob is None:
+        issues.append("אין ספר פקודות")
+    else:
+        if (now - ob["ts"]).total_seconds() / 60 > stale_after:
+            issues.append("ספר הפקודות ישן")
+        if not ob.get("valid"):
+            issues.append("ספר פקודות לא תקין (חד-צדדי/חוצה)")
+        elif ob["spread"] is not None and ob["spread"] > 0.10:
+            issues.append("מרווח רחב מ-10¢")
+        if ob.get("buy_vwap_1000") is None:
+            issues.append("אין עומק ל-$1,000")
+    level = "good" if not issues else ("limited" if len(issues) == 1 and "אין עומק ל-$1,000" in issues else "bad")
+    return {"level": level, "issues": issues}
+
+
 @asynccontextmanager
 async def lifespan(_app):
     global pool
@@ -42,7 +67,11 @@ def health():
     counts = q("""SELECT (SELECT count(*) FROM markets WHERE active AND NOT closed) AS open_markets,
                          (SELECT count(*) FROM markets WHERE closed AND resolved_outcome IS NOT NULL) AS resolved_markets,
                          (SELECT count(DISTINCT token_id) FROM price_history) AS tokens_with_history,
-                         (SELECT max(ts) FROM snapshots) AS last_snapshot""")[0]
+                         (SELECT max(ts) FROM snapshots) AS last_snapshot,
+                         (SELECT count(*) FROM orderbooks) AS orderbook_rows,
+                         (SELECT max(ts) FROM orderbooks) AS last_orderbook,
+                         (SELECT round(100.0 * avg(valid::int), 1) FROM orderbooks
+                           WHERE ts > now() - interval '24 hours') AS orderbook_valid_pct_24h""")[0]
     lag = None
     if counts["last_snapshot"]:
         lag = (datetime.now(timezone.utc) - counts["last_snapshot"]).total_seconds() / 60
@@ -107,6 +136,11 @@ def market(market_id: str, days: int = Query(30, le=365)):
                           WHERE market_id = %s AND ts > now() - make_interval(days => %s)
                           ORDER BY ts""", (market_id, days))
     m["history"] = q("SELECT ts, price FROM price_history WHERE market_id = %s ORDER BY ts", (market_id,))
+    ob = q("""SELECT ts, best_bid, best_ask, spread, bid_depth_5c, ask_depth_5c, buy_vwap_100,
+                     buy_vwap_1000, sell_vwap_100, sell_vwap_1000, valid, n_bids, n_asks
+              FROM orderbooks WHERE market_id = %s ORDER BY ts DESC LIMIT 1""", (market_id,))
+    m["orderbook"] = ob[0] if ob else None
+    m["data_quality"] = data_quality(m, m["orderbook"])
     m.update(DECISION)
     return m
 
@@ -134,5 +168,13 @@ def movers(hours: int = Query(24, le=24 * 30), limit: int = Query(20, le=100), m
 
 @app.get("/api/research/latest")
 def research_latest():
-    rows = q("SELECT id, created_at, kind, params, result FROM research_reports ORDER BY id DESC LIMIT 1")
+    rows = q("""SELECT id, created_at, kind, params, result FROM research_reports
+                WHERE kind = 'historical_v1' ORDER BY id DESC LIMIT 1""")
+    return rows[0] if rows else None
+
+
+@app.get("/api/integration/latest")
+def integration_latest():
+    rows = q("""SELECT id, created_at, result FROM research_reports
+                WHERE kind = 'integration' ORDER BY id DESC LIMIT 1""")
     return rows[0] if rows else None

@@ -77,6 +77,28 @@ CREATE TABLE IF NOT EXISTS research_reports (
     result     jsonb
 );
 
+-- Live order-book observations (reference outcome token). Only what we observed.
+CREATE TABLE IF NOT EXISTS orderbooks (
+    ts             timestamptz NOT NULL,
+    market_id      text NOT NULL,
+    token_id       text NOT NULL,
+    best_bid       double precision,
+    best_ask       double precision,
+    spread         double precision,
+    bid_depth_5c   double precision,
+    ask_depth_5c   double precision,
+    buy_vwap_100   double precision,
+    buy_vwap_1000  double precision,
+    sell_vwap_100  double precision,
+    sell_vwap_1000 double precision,
+    levels         jsonb,
+    valid          boolean,
+    n_bids         int,
+    n_asks         int,
+    fetched_at     timestamptz,
+    PRIMARY KEY (market_id, ts)
+);
+
 -- TimescaleDB is optional: used when available (docker image), skipped on plain Postgres.
 DO $$
 BEGIN
@@ -84,11 +106,14 @@ BEGIN
         CREATE EXTENSION IF NOT EXISTS timescaledb;
         PERFORM create_hypertable('snapshots', 'ts', if_not_exists => TRUE, migrate_data => TRUE);
         PERFORM create_hypertable('price_history', 'ts', if_not_exists => TRUE, migrate_data => TRUE);
+        PERFORM create_hypertable('orderbooks', 'ts', if_not_exists => TRUE, migrate_data => TRUE);
         BEGIN
             ALTER TABLE snapshots SET (timescaledb.compress, timescaledb.compress_segmentby = 'market_id');
             PERFORM add_compression_policy('snapshots', INTERVAL '7 days', if_not_exists => TRUE);
             ALTER TABLE price_history SET (timescaledb.compress, timescaledb.compress_segmentby = 'token_id');
             PERFORM add_compression_policy('price_history', INTERVAL '30 days', if_not_exists => TRUE);
+            ALTER TABLE orderbooks SET (timescaledb.compress, timescaledb.compress_segmentby = 'market_id');
+            PERFORM add_compression_policy('orderbooks', INTERVAL '7 days', if_not_exists => TRUE);
         EXCEPTION WHEN OTHERS THEN
             RAISE NOTICE 'compression setup skipped: %', SQLERRM;
         END;

@@ -90,3 +90,14 @@ def job_run(conn: psycopg.Connection, job: str):
         raise
     conn.execute("UPDATE job_runs SET finished_at = now(), status = 'ok', items = %s WHERE id = %s",
                  (state["items"], run_id))
+
+
+OB_COLS = ["best_bid", "best_ask", "spread", "bid_depth_5c", "ask_depth_5c",
+           "buy_vwap_100", "buy_vwap_1000", "sell_vwap_100", "sell_vwap_1000", "valid", "n_bids", "n_asks"]
+
+
+def insert_orderbook(conn: psycopg.Connection, ts, market_id: str, token_id: str, summary: dict) -> None:
+    conn.execute(
+        f"INSERT INTO orderbooks (ts, market_id, token_id, {', '.join(OB_COLS)}, levels, fetched_at) "
+        f"VALUES (%s, %s, %s, {', '.join(['%s'] * len(OB_COLS))}, %s, now()) ON CONFLICT DO NOTHING",
+        (ts, market_id, token_id, *[summary[c] for c in OB_COLS], Jsonb(summary["levels"])))

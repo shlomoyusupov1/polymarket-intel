@@ -8,8 +8,9 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from . import config, db, research
+from .orderbook import summarize
 from .normalize import normalize_market
-from .sources import Gamma
+from .sources import Clob, Gamma
 
 log = logging.getLogger("collector")
 
@@ -34,7 +35,32 @@ def collect_once(conn, gamma: Gamma, now: datetime | None = None) -> dict:
         db.insert_snapshots(conn, now, liquid)
         run["items"] = len(liquid)
     log.info("collected %d open markets, snapshotted %d", len(records), len(liquid))
-    return {"markets": len(records), "snapshots": len(liquid)}
+    return {"markets": len(records), "snapshots": len(liquid), "records": records}
+
+
+def collect_orderbooks(conn, clob: Clob, records: list[dict], now: datetime,
+                       top_n: int | None = None) -> dict:
+    """Snapshot the books of the most-traded open markets. One bad market never stops the rest."""
+    top_n = config.ORDERBOOK_TOP_N if top_n is None else top_n
+    cands = [r for r in records if r["ref_index"] is not None and r["ref_index"] < len(r["token_ids"])]
+    cands.sort(key=lambda r: r["volume_24h"] or 0, reverse=True)
+    stats = {"ok": 0, "empty": 0, "error": 0}
+    with db.job_run(conn, "orderbooks") as run:
+        for r in cands[:top_n]:
+            token = r["token_ids"][r["ref_index"]]
+            try:
+                summary = summarize(clob.book(token))
+            except Exception as e:  # noqa: BLE001 - logged and counted, visible in System Health
+                log.warning("book failed for %s: %s", r["id"], e)
+                stats["error"] += 1
+                continue
+            if summary is None:
+                stats["empty"] += 1
+                continue
+            db.insert_orderbook(conn, now, r["id"], token, summary)
+            stats["ok"] += 1
+        run["items"] = stats["ok"]
+    return stats
 
 
 def sync_recently_closed(conn, gamma: Gamma, days: int = 30) -> int:
@@ -54,12 +80,13 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     conn = db.connect()
     db.init_schema(conn)
-    gamma = Gamma()
+    gamma, clob = Gamma(), Clob()
     last_daily = None
     while True:
         started = time.monotonic()
         try:
-            collect_once(conn, gamma)
+            out = collect_once(conn, gamma)
+            collect_orderbooks(conn, clob, out["records"], datetime.now(timezone.utc))
         except Exception:
             log.exception("collect failed")
         today = datetime.now(timezone.utc)

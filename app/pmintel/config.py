@@ -18,6 +18,8 @@ COLLECT_INTERVAL_MIN = _int("COLLECT_INTERVAL_MIN", 15)
 # Only markets with at least this liquidity get a price snapshot (metadata is stored for all).
 SNAPSHOT_MIN_LIQUIDITY = _float("SNAPSHOT_MIN_LIQUIDITY", 1000)
 RESEARCH_HOUR_UTC = _int("RESEARCH_HOUR_UTC", 3)
+# Live order books for the N most-traded markets each cycle (executable prices + depth)
+ORDERBOOK_TOP_N = _int("ORDERBOOK_TOP_N", 50)
 
 # Backfill
 BACKFILL_SINCE = os.environ.get("BACKFILL_SINCE", "2024-01-01")

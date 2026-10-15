@@ -43,3 +43,6 @@ class Clob:
             except (KeyError, TypeError, ValueError):
                 continue
         return out
+
+    def book(self, token_id: str) -> dict:
+        return self.api.get("/book", {"token_id": token_id}) or {}

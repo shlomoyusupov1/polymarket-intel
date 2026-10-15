@@ -46,7 +46,7 @@ def closed_market(i, price_before, yes_won, event):
 @pytest.fixture()
 def conn():
     c = db.connect(DB)
-    c.execute("DROP TABLE IF EXISTS markets, snapshots, price_history, job_runs, research_reports CASCADE")
+    c.execute("DROP TABLE IF EXISTS markets, snapshots, price_history, orderbooks, job_runs, research_reports CASCADE")
     db.init_schema(c)
     db.init_schema(c)  # idempotent
     yield c
@@ -60,7 +60,19 @@ def test_full_pipeline(conn, monkeypatch):
     pages = {0: opens[:2], 2: opens[2:], 5: []}
     gamma_live = Gamma(api_of(lambda r: httpx.Response(200, json=pages[int(r.url.params["offset"])])))
     out = collector.collect_once(conn, gamma_live, now=NOW - timedelta(hours=25))
-    assert out == {"markets": 4, "snapshots": 3}
+    assert out["markets"] == 4 and out["snapshots"] == 3
+
+    # ---- order books: top-2 by 24h volume; one market's book errors, which must not stop others ----
+    def book_handler(r):
+        tok = r.url.params["token_id"]
+        if tok == "t2y":
+            return httpx.Response(500)
+        return httpx.Response(200, json={"bids": [{"price": "0.29", "size": "1000"}],
+                                         "asks": [{"price": "0.31", "size": "1000"}]})
+    clob_live = Clob(api_of(book_handler))
+    clob_live.api.max_retries = 0
+    ob = collector.collect_orderbooks(conn, clob_live, out["records"], NOW, top_n=2)
+    assert ob == {"ok": 1, "empty": 0, "error": 1}
     # second snapshot later with a price move on market 1
     opens[0] = opens[4] = open_market(1, 50000, 0.45)
     pages[0], pages[2] = opens[:2], opens[2:]
@@ -117,6 +129,12 @@ def test_full_pipeline(conn, monkeypatch):
         assert tc.get("/api/markets", params={"search": "market 2"}).json()[0]["id"] == "2"
         d = tc.get("/api/markets/1").json()
         assert d["url"] == "https://polymarket.com/event/ev-1" and len(d["snapshots"]) == 2
+        assert d["orderbook"]["best_ask"] == 0.31 and abs(d["orderbook"]["buy_vwap_100"] - 0.31) < 1e-9
+        assert h["counts"]["orderbook_rows"] == 1
+        assert d["orderbook"]["valid"] is True
+        assert d["data_quality"] == {"level": "limited", "issues": ["אין עומק ל-$1,000"]}
+        d3 = tc.get("/api/markets/3").json()  # no order book collected -> never 'good'
+        assert d3["data_quality"]["level"] == "bad" and "אין ספר פקודות" in d3["data_quality"]["issues"]
         assert tc.get("/api/markets/nope").status_code == 404
         r = tc.get("/api/research/latest").json()
         assert r["result"]["24"]["calibration"]["n"] == 60

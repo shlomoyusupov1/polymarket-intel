@@ -141,6 +141,27 @@ function lineChart(points) {
   svg.append(path);
   return svg;
 }
+function qualityBlock(dq) {
+  if (!dq) return null;
+  const cls = dq.level === "good" ? "ok" : dq.level === "limited" ? "wait" : "err";
+  const label = { good: "איכות נתונים: טובה", limited: "איכות נתונים: חלקית", bad: "איכות נתונים: לא מספקת" }[dq.level];
+  return h("div", { class: "decision" }, h("span", { class: "badge " + cls }, label),
+    dq.issues.length ? h("div", { class: "note" }, dq.issues.join(" · ")) : null);
+}
+function execBlock(m) {
+  const o = m.orderbook;
+  if (!o) return h("p", { class: "note" }, "אין עדיין ספר פקודות למעקב בשוק הזה (נאסף רק לשווקים המובילים).");
+  const row = (l, a, b) => h("tr", {}, h("td", {}, l), h("td", {}, h("bdi", { dir: "ltr" }, a)), h("td", {}, h("bdi", { dir: "ltr" }, b)));
+  return h("div", {},
+    h("h2", {}, "מחיר ביצוע אמיתי (" + (m.ref_outcome ?? "") + ")"),
+    h("p", { class: "note" }, "מתוך ספר הפקודות, " + ago(o.ts) + ". אם ריק — אין מספיק עומק."),
+    h("div", { class: "scroll" }, h("table", {},
+      h("thead", {}, h("tr", {}, h("th", {}, ""), h("th", {}, "$100"), h("th", {}, "$1,000"))),
+      h("tbody", {},
+        row("קנייה", pct(o.buy_vwap_100), pct(o.buy_vwap_1000)),
+        row("מכירה", pct(o.sell_vwap_100), pct(o.sell_vwap_1000)),
+        row("עומק ±5¢", usd(o.bid_depth_5c) + " / " + usd(o.ask_depth_5c), "")))));
+}
 async function openMarket(id) {
   const body = $("sheet-body");
   body.replaceChildren(empty("טוען…"));
@@ -158,6 +179,8 @@ async function openMarket(id) {
         ...[["מחיר שוק (" + (m.ref_outcome ?? "?") + ")", pct(m.ref_price)], ["Bid / Ask", `${num(m.best_bid, 2)} / ${num(m.best_ask, 2)}`],
             ["נזילות", usd(m.liquidity)], ["נפח 24ש׳", usd(m.volume_24h)]]
           .map(([l, v]) => h("div", { class: "kpi" }, h("div", { class: "v" }, v), h("div", { class: "l" }, l)))),
+      qualityBlock(m.data_quality),
+      execBlock(m),
       h("div", { class: "decision" },
         h("span", { class: "badge wait" }, m.decision), " ", m.reason,
         h("div", { class: "note" }, "הסתברות עצמאית: אין · יתרון משוער: אין · ביטחון: INSUFFICIENT EVIDENCE")),
@@ -202,7 +225,7 @@ loaders.research = async () => {
 };
 
 // ---------- system ----------
-const JOBS = { collect: "איסוף חי", sync_closed: "סנכרון שווקים שנסגרו", backfill: "Backfill היסטורי", research: "דוח מחקר" };
+const JOBS = { orderbooks: "ספרי פקודות", collect: "איסוף חי", sync_closed: "סנכרון שווקים שנסגרו", backfill: "Backfill היסטורי", research: "דוח מחקר" };
 loaders.system = async () => {
   const box = $("system-body");
   try {
@@ -212,6 +235,7 @@ loaders.system = async () => {
       h("div", { class: "kpis" },
         ...[["שווקים פתוחים", c.open_markets], ["שווקים שנפתרו", c.resolved_markets],
             ["טוקנים עם היסטוריה", c.tokens_with_history],
+            ["ספרי פקודות שנאספו", c.orderbook_rows],
             ["פיגור snapshot", hl.snapshot_lag_min == null ? "—" : Math.round(hl.snapshot_lag_min) + " דק׳"]]
           .map(([l, v]) => h("div", { class: "kpi" }, h("div", { class: "v" }, String(v ?? 0)), h("div", { class: "l" }, l)))),
       h("h2", {}, "עבודות"),
