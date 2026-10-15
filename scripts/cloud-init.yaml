@@ -1,0 +1,7 @@
+#cloud-config
+# Paste this into Oracle "Create instance" -> Show advanced options -> Management -> Paste cloud-init script.
+# Installs everything and starts the stack. Takes ~10 minutes after the VM boots.
+# Result: /home/ubuntu/DASHBOARD.txt (URL + password), log: /home/ubuntu/bootstrap.log
+runcmd:
+  - su - ubuntu -c "git clone https://github.com/shlomoyusupov1/polymarket-intel.git ~/polymarket-intel"
+  - su - ubuntu -c "bash ~/polymarket-intel/scripts/bootstrap.sh"
