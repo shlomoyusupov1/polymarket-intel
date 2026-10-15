@@ -57,9 +57,14 @@ def run(gamma: Gamma, clob: Clob) -> dict:
         return n > 0, {"rows": n, "unique_ids": len(ids), "duplicates": n - len(ids)}
 
     def deep_offset():
-        page = gamma.api.get("/markets", {"closed": "true", "limit": 100, "offset": 20000})
-        return True, {"offset_20000_rows": len(page),
-                      "note": "0 rows may mean an offset cap; monthly windows in backfill avoid depending on it"}
+        # Documents the offset cap we discovered; we don't depend on offset paging any more.
+        import httpx
+        try:
+            page = gamma.api.get("/markets", {"closed": "true", "limit": 100, "offset": 20000})
+            return True, {"offset_20000_rows": len(page), "offset_cap": False}
+        except httpx.HTTPStatusError as e:
+            return e.response.status_code == 422, {"offset_cap": True, "status": e.response.status_code,
+                                                    "note": "expected; discovery uses /markets/keyset"}
 
     def closed_history():
         since = (datetime.now(timezone.utc) - timedelta(days=60)).date().isoformat()

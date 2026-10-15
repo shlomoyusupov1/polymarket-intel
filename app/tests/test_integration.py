@@ -14,6 +14,8 @@ from pmintel import backfill, collector, config, db, research
 from pmintel.http import ApiClient
 from pmintel.sources import Clob, Gamma
 
+from keyset_mock import keyset_response
+
 DB = os.environ.get("PMINTEL_TEST_DB")
 pytestmark = pytest.mark.skipif(not DB, reason="PMINTEL_TEST_DB not set")
 
@@ -57,8 +59,8 @@ def test_full_pipeline(conn, monkeypatch):
     # ---- live collection: 3 liquid, 1 illiquid, 1 duplicated across pages ----
     opens = [open_market(1, 50000, 0.30), open_market(2, 20000, 0.80), open_market(3, 5000, 0.50),
              open_market(4, 10, 0.50), open_market(1, 50000, 0.30)]
-    pages = {0: opens[:2], 2: opens[2:], 5: []}
-    gamma_live = Gamma(api_of(lambda r: httpx.Response(200, json=pages[int(r.url.params["offset"])])))
+    live = {"rows": opens}
+    gamma_live = Gamma(api_of(lambda r: keyset_response(r, live["rows"], page=2)))
     out = collector.collect_once(conn, gamma_live, now=NOW - timedelta(hours=25))
     assert out["markets"] == 4 and out["snapshots"] == 3
 
@@ -75,7 +77,6 @@ def test_full_pipeline(conn, monkeypatch):
     assert ob == {"ok": 1, "empty": 0, "error": 1}
     # second snapshot later with a price move on market 1
     opens[0] = opens[4] = open_market(1, 50000, 0.45)
-    pages[0], pages[2] = opens[:2], opens[2:]
     collector.collect_once(conn, gamma_live, now=NOW)
     assert conn.execute("SELECT count(*) FROM snapshots").fetchone()[0] == 6
 
@@ -90,8 +91,7 @@ def test_full_pipeline(conn, monkeypatch):
     closed.append(unresolved)
     by_token = {f"c{i}y": m["_p"] for i, m in enumerate(closed[:60])}
 
-    gamma_hist = Gamma(api_of(lambda r: httpx.Response(
-        200, json=closed if int(r.url.params["offset"]) == 0 else [])))
+    gamma_hist = Gamma(api_of(lambda r: keyset_response(r, closed, page=25)))
 
     def clob_handler(r):
         tok = r.url.params["market"]

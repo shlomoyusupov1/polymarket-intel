@@ -4,6 +4,8 @@ from pmintel import validate
 from pmintel.http import ApiClient
 from pmintel.sources import Clob, Gamma
 
+from keyset_mock import keyset_response
+
 MKT = {"id": "1", "question": "Q?", "outcomes": '["Yes","No"]', "outcomePrices": '["0.4","0.6"]',
        "clobTokenIds": '["a","b"]', "volume24hr": 10, "events": [{"id": 9, "slug": "ev"}]}
 CLOSED = {**MKT, "id": "2", "closed": True, "outcomePrices": '["1","0"]'}
@@ -15,10 +17,13 @@ def api(handler):
 
 
 def gamma_handler(r):
-    first = r.url.params.get("offset", "0") == "0"
+    if r.url.path == "/markets/keyset":
+        return keyset_response(r, [MKT, {**MKT, "id": "3"}], page=1)
+    if r.url.params.get("offset") == "20000":
+        return httpx.Response(422)  # the real production behaviour
     if r.url.params.get("closed") == "true":
-        return httpx.Response(200, json=[CLOSED] if first else [])
-    return httpx.Response(200, json=[MKT] if first else [])
+        return httpx.Response(200, json=[CLOSED])
+    return httpx.Response(200, json=[MKT])
 
 
 def clob_handler(r):

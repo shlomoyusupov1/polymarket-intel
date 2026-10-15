@@ -4,24 +4,32 @@ import pytest
 from pmintel.http import ApiClient
 from pmintel.sources import Clob, Gamma
 
+from keyset_mock import keyset_response
+
 
 def make(handler):
     return ApiClient("https://x", client=httpx.Client(transport=httpx.MockTransport(handler)),
                      sleep=lambda s: None, min_interval=0)
 
 
-def test_pagination_until_empty_page_even_if_server_caps_page_size():
+def test_keyset_pagination_follows_cursor_to_the_end():
     data = [{"id": i} for i in range(250)]
     calls = []
 
     def handler(req):
-        off = int(req.url.params["offset"])
-        calls.append(off)
-        return httpx.Response(200, json=data[off:off + 100])  # server caps at 100 despite limit=500
+        assert req.url.path == "/markets/keyset"
+        calls.append(req.url.params.get("after_cursor"))
+        return keyset_response(req, data, page=100)
 
-    out = list(Gamma(make(handler), page_size=500).iter_markets(active="true"))
+    out = list(Gamma(make(handler)).iter_markets(active="true"))
     assert [m["id"] for m in out] == list(range(250))
-    assert calls == [0, 100, 200, 250]
+    assert calls == [None, "100", "200"]
+
+
+def test_ignored_cursor_is_detected():
+    g = Gamma(make(lambda req: httpx.Response(200, json={"markets": [{"id": 1}], "next_cursor": "x" + str(len(req.url.params))})))
+    with pytest.raises(RuntimeError):
+        list(g.iter_markets())
 
 
 def test_retry_on_429_then_success():
@@ -45,7 +53,13 @@ def test_gives_up_after_max_retries():
 
 
 def test_runaway_pagination_guard():
-    g = Gamma(make(lambda req: httpx.Response(200, json=[{"id": 1}])), page_size=1, max_pages=5)
+    n = {"i": 0}
+
+    def handler(req):
+        n["i"] += 1
+        return httpx.Response(200, json={"markets": [{"id": n["i"]}], "next_cursor": f"c{n['i']}"})
+
+    g = Gamma(make(handler), page_size=1, max_pages=5)
     with pytest.raises(RuntimeError):
         list(g.iter_markets())
 
