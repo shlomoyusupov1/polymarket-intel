@@ -56,3 +56,12 @@ def test_edge_requires_enough_events_and_positive_ci():
     assert s["edge_supported"] is False  # zero variance -> no stderr -> not claimed
     few = strategy(rows([(0.02, 0, "a"), (0.02, 0, "b"), (0.02, 1, "c")]), "NO", 0, 0.05, 0, 0)
     assert few["edge_supported"] is False
+
+
+def test_month_windows_cover_range_without_gaps():
+    from datetime import date
+    from pmintel.backfill import month_windows
+    w = list(month_windows("2024-11-15", today=date(2025, 2, 3)))
+    assert w[0] == (date(2024, 11, 15), date(2024, 12, 1))
+    assert w[-1] == (date(2025, 2, 1), date(2025, 3, 1))
+    assert all(a[1] == b[0] for a, b in zip(w, w[1:])) and len(w) == 4

@@ -15,9 +15,14 @@ sudo systemctl enable --now docker
 echo "==> Opening ports 80/443 in the VM firewall"
 # Oracle's Ubuntu images ship iptables rules that REJECT everything except SSH.
 # The VCN Security List must ALSO allow 80/443 (done in the Oracle console, see README).
+REJECT_LINE=$(sudo iptables -L INPUT --line-numbers -n | awk '$2=="REJECT"{print $1; exit}')
 for port in 80 443; do
   if ! sudo iptables -C INPUT -p tcp -m state --state NEW --dport "$port" -j ACCEPT 2>/dev/null; then
-    sudo iptables -I INPUT 6 -p tcp -m state --state NEW --dport "$port" -j ACCEPT
+    if [ -n "$REJECT_LINE" ]; then
+      sudo iptables -I INPUT "$REJECT_LINE" -p tcp -m state --state NEW --dport "$port" -j ACCEPT
+    else
+      sudo iptables -A INPUT -p tcp -m state --state NEW --dport "$port" -j ACCEPT
+    fi
   fi
 done
 sudo netfilter-persistent save
@@ -26,6 +31,7 @@ echo "==> Preparing .env"
 cd "$(dirname "$0")/.."
 if [ ! -f .env ]; then
   cp .env.example .env
+  chmod 600 .env
   sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" .env
   IP=$(curl -fsS https://ifconfig.me || true)
   if [ -n "$IP" ]; then

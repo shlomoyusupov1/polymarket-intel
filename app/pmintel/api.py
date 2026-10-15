@@ -39,7 +39,7 @@ def health():
                 FROM job_runs ORDER BY job, started_at DESC""")
     last_ok = q("""SELECT job, max(finished_at) AS last_ok FROM job_runs
                    WHERE status = 'ok' GROUP BY job""")
-    counts = q("""SELECT (SELECT count(*) FROM markets WHERE NOT closed) AS open_markets,
+    counts = q("""SELECT (SELECT count(*) FROM markets WHERE active AND NOT closed) AS open_markets,
                          (SELECT count(*) FROM markets WHERE closed AND resolved_outcome IS NOT NULL) AS resolved_markets,
                          (SELECT count(DISTINCT token_id) FROM price_history) AS tokens_with_history,
                          (SELECT max(ts) FROM snapshots) AS last_snapshot""")[0]
@@ -58,7 +58,7 @@ def overview():
                         count(*) FILTER (WHERE liquidity >= %s) AS tracked_markets,
                         sum(volume_24h) AS volume_24h, sum(liquidity) AS liquidity,
                         max(updated_at) AS last_update
-                 FROM markets WHERE NOT closed""", (config.SNAPSHOT_MIN_LIQUIDITY,))[0]
+                 FROM markets WHERE active AND NOT closed""", (config.SNAPSHOT_MIN_LIQUIDITY,))[0]
     return {"stats": stats, "movers": movers(hours=24, limit=8)}
 
 
@@ -69,7 +69,7 @@ SORTS = {"volume_24h": "volume_24h", "liquidity": "liquidity", "volume": "volume
 def markets(search: str | None = None, category: str | None = None,
             sort: str = Query("volume_24h", enum=list(SORTS)), min_liquidity: float = 0,
             limit: int = Query(50, le=200), offset: int = 0):
-    where, params = ["NOT closed"], []
+    where, params = ["active AND NOT closed"], []
     if search:
         where.append("question ILIKE %s")
         params.append(f"%{search}%")
@@ -94,7 +94,7 @@ def markets(search: str | None = None, category: str | None = None,
 @app.get("/api/categories")
 def categories():
     return q("""SELECT COALESCE(category, '') AS category, count(*) AS n FROM markets
-                WHERE NOT closed GROUP BY 1 ORDER BY 2 DESC""")
+                WHERE active AND NOT closed GROUP BY 1 ORDER BY 2 DESC""")
 
 
 @app.get("/api/markets/{market_id}")
@@ -127,7 +127,7 @@ def movers(hours: int = Query(24, le=24 * 30), limit: int = Query(20, le=100), m
                p.ref_price AS price_then, l.ref_price AS price_now,
                l.ref_price - p.ref_price AS change, p.ts AS ts_then, l.ts AS ts_now
         FROM latest l JOIN past p USING (market_id) JOIN markets m ON m.id = l.market_id
-        WHERE m.liquidity >= %s AND NOT m.closed AND l.ref_price IS DISTINCT FROM p.ref_price
+        WHERE m.liquidity >= %s AND m.active AND NOT m.closed AND l.ref_price IS DISTINCT FROM p.ref_price
         ORDER BY abs(l.ref_price - p.ref_price) DESC NULLS LAST LIMIT %s""",
              (hours, hours, min_liquidity, limit))
 

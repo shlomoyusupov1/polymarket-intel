@@ -7,6 +7,9 @@ Resumable: tokens that already have history are skipped.
 """
 import argparse
 import logging
+from datetime import date, datetime, timedelta, timezone
+
+import httpx
 
 from . import config, db
 from .normalize import normalize_market
@@ -15,15 +18,39 @@ from .sources import Clob, Gamma
 log = logging.getLogger("backfill")
 
 
+def month_windows(since: str, today: date | None = None):
+    """[start, end) month windows from `since` to today. Small windows keep pagination
+    offsets low, so a server-side offset cap can't silently truncate the history."""
+    start = date.fromisoformat(since).replace(day=1)
+    today = today or datetime.now(timezone.utc).date()
+    while start <= today:
+        nxt = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        yield max(start, date.fromisoformat(since)), nxt
+        start = nxt
+
+
+def iter_closed(gamma: Gamma, since: str, min_volume: float):
+    for lo, hi in month_windows(since):
+        base = {"closed": "true", "end_date_min": lo.isoformat(), "end_date_max": hi.isoformat()}
+        try:
+            yield from gamma.iter_markets(**base, volume_num_min=min_volume)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code not in (400, 422):
+                raise
+            log.warning("server rejected volume filter (%s); filtering client-side", e.response.status_code)
+            yield from gamma.iter_markets(**base)
+
+
 def backfill(conn, gamma: Gamma, clob: Clob, since: str, min_volume: float, fidelity: int,
              limit: int | None = None, with_history: bool = True) -> dict:
     stats = {"seen": 0, "resolved": 0, "history_fetched": 0, "history_points": 0, "history_empty": 0}
     with db.job_run(conn, "backfill") as run:
         batch: dict[str, dict] = {}
-        for raw in gamma.iter_markets(closed="true", end_date_min=since, volume_num_min=min_volume,
-                                      order="volumeNum", ascending="false"):
-            if "id" not in raw:
+        seen_ids: set[str] = set()
+        for raw in iter_closed(gamma, since, min_volume):
+            if "id" not in raw or str(raw["id"]) in seen_ids:
                 continue
+            seen_ids.add(str(raw["id"]))
             rec = normalize_market(raw)
             if (rec["volume"] or 0) < min_volume:  # don't trust the server-side filter blindly
                 continue

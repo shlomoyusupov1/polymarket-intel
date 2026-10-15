@@ -16,6 +16,7 @@ log = logging.getLogger("collector")
 
 def collect_once(conn, gamma: Gamma, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
+    scan_started = conn.execute("SELECT now()").fetchone()[0]
     with db.job_run(conn, "collect") as run:
         seen: dict[str, dict] = {}
         for raw in gamma.iter_markets(active="true", closed="false"):
@@ -25,6 +26,9 @@ def collect_once(conn, gamma: Gamma, now: datetime | None = None) -> dict:
             seen[rec["id"]] = rec  # dedupe across pages
         records = list(seen.values())
         db.upsert_markets(conn, records)
+        if records:  # never deactivate everything because of an empty/failed scan
+            conn.execute("UPDATE markets SET active = false WHERE active AND NOT closed AND updated_at < %s",
+                         (scan_started,))
         liquid = [r for r in records if (r["liquidity"] or 0) >= config.SNAPSHOT_MIN_LIQUIDITY
                   and r["ref_price"] is not None]
         db.insert_snapshots(conn, now, liquid)
@@ -33,7 +37,7 @@ def collect_once(conn, gamma: Gamma, now: datetime | None = None) -> dict:
     return {"markets": len(records), "snapshots": len(liquid)}
 
 
-def sync_recently_closed(conn, gamma: Gamma, days: int = 7) -> int:
+def sync_recently_closed(conn, gamma: Gamma, days: int = 30) -> int:
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
     with db.job_run(conn, "sync_closed") as run:
         recs = {}
