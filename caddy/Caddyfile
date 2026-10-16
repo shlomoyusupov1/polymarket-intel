@@ -18,6 +18,8 @@
 	}
 
 	handle {
+		# always revalidate, so a deploy never mixes old cached CSS/JS with new HTML
+		header Cache-Control "no-cache"
 		root * /srv
 		file_server
 	}
