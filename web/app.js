@@ -72,6 +72,7 @@ const ICON = {
   search: "m21 21-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z",
   ext: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
   back: "M9 6l6 6-6 6",
+  shield: "M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6zM12 8v5M12 16h.01",
 };
 const icon = (name, size = 20) => s("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
   "stroke-width": 1.9, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" }, s("path", { d: ICON[name] }));
@@ -99,6 +100,7 @@ const ROUTES = [
   { id: "scanner", path: "#/scanner", label: "סורק הזדמנויות", short: "הזדמנויות", icon: "radar", nav: "both" },
   { id: "watchlist", path: "#/watchlist", label: "רשימת מעקב", short: "מעקב", icon: "star", nav: "both" },
   { id: "research", path: "#/research", label: "מעבדת מחקר", icon: "lab", nav: "side" },
+  { id: "check", path: "#/check", label: "בודק מניות חשודות", icon: "shield", nav: "side" },
   { id: "etf", path: "#/etf", label: "חדר מסחר ETF (נייר)", icon: "wallet", nav: "side" },
   { id: "portfolio", path: "#/portfolio", label: "תיק נייר", icon: "wallet", nav: "side", soon: true },
   { id: "alerts", path: "#/alerts", label: "התראות", icon: "bell", nav: "side", soon: true },
@@ -119,10 +121,12 @@ function route() {
   const hash = location.hash || "#/";
   let id = "home", arg = null;
   const m = hash.match(/^#\/m\/(.+)$/);
+  const mc = hash.match(/^#\/check\/(.+)$/);
   if (m) { id = "detail"; arg = decodeURIComponent(m[1]); }
+  else if (mc) { id = "check"; arg = decodeURIComponent(mc[1]); }
   else { const r = ROUTES.find((x) => x.path === hash); if (r) id = r.id; }
   current = id;
-  const navId = id === "detail" ? "markets" : (["research", "etf", "portfolio", "alerts", "system"].includes(id) && innerWidth < 960 ? "more" : id);
+  const navId = id === "detail" ? "markets" : (["research", "check", "etf", "portfolio", "alerts", "system"].includes(id) && innerWidth < 960 ? "more" : id);
   document.querySelectorAll("[data-route]").forEach((a) => a.toggleAttribute("aria-current", false));
   document.querySelectorAll(`[data-route="${navId}"], #side-nav [data-route="${id === "detail" ? "markets" : id}"]`)
     .forEach((a) => a.setAttribute("aria-current", "page"));
@@ -496,6 +500,64 @@ function reliability(buckets) {
     buckets.map((b) => [s("line", { x1: X(b.mean_price), x2: X(b.mean_price), y1: Y(b.ci_lo), y2: Y(b.ci_hi), stroke: "#5B9BFF", "stroke-width": 1.5 }),
       s("circle", { cx: X(b.mean_price), cy: Y(b.freq), r: 3 + 6 * Math.sqrt(b.n / maxN), fill: "#5B9BFF", "fill-opacity": 0.85 })]));
 }
+
+// ---- Suspicious-stock checker ----
+const VERDICT = { red: ["bad", "אדום — דגלים של ניפוח מחיר (pump). לא להיכנס."], yellow: ["wait", "צהוב — יש סימני סיכון, לבדוק לעומק."],
+  green: ["ok", "ירוק — לא נמצאו דגלים אדומים. זה לא אומר שהמניה טובה."], unknown: ["info", "אין מספיק נתונים"] };
+function priceChart(bars) {
+  const W = 800, H = 220, P = { t: 10, r: 10, b: 22, l: 50 };
+  const c = bars.map((b) => b.c), y0 = Math.min(...c) * 0.95, y1 = Math.max(...c) * 1.05;
+  const X = (i) => P.l + i / Math.max(1, bars.length - 1) * (W - P.l - P.r), Y = (v) => P.t + (1 - (v - y0) / (y1 - y0)) * (H - P.t - P.b);
+  const up = c[c.length - 1] >= c[0];
+  return h("div", { class: "chart-wrap" }, s("svg", { class: "chart", direction: "ltr", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", role: "img", "aria-label": "מחיר סגירה בשנה האחרונה" },
+    [y0, (y0 + y1) / 2, y1].map((v) => [s("line", { x1: P.l, x2: W - P.r, y1: Y(v), y2: Y(v), stroke: "#243041" }),
+      s("text", { x: P.l - 6, y: Y(v) + 4, "text-anchor": "end", "font-size": 11, fill: "#6F8094" }, "$" + v.toFixed(v < 10 ? 2 : 0))]),
+    s("text", { x: P.l, y: H - 5, "font-size": 11, fill: "#6F8094" }, bars[0].day),
+    s("text", { x: W - P.r, y: H - 5, "text-anchor": "end", "font-size": 11, fill: "#6F8094" }, bars[bars.length - 1].day),
+    s("path", { d: bars.map((b, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(b.c).toFixed(1)}`).join(""), fill: "none",
+      stroke: up ? "var(--up)" : "var(--down)", "stroke-width": 2, "vector-effect": "non-scaling-stroke" })));
+}
+PAGES.check = async (view, sym) => {
+  const input = h("input", { type: "search", placeholder: "סימול, למשל PSIG", value: sym || "", "aria-label": "סימול מניה", autocomplete: "off", dir: "ltr" });
+  const isin = h("input", { type: "search", placeholder: "ISIN (לא חובה)", "aria-label": "ISIN", autocomplete: "off", dir: "ltr" });
+  const out = h("div", { class: "stack" });
+  const go = (e) => { e.preventDefault(); const v = input.value.trim().toUpperCase(); if (v) location.hash = "#/check/" + encodeURIComponent(v) + (isin.value.trim() ? "?isin=" + encodeURIComponent(isin.value.trim()) : ""); };
+  view.replaceChildren(h("div", { class: "stack" },
+    card("בודק מניות חשודות", "קיבלת \"המלצה חמה\"? תבדוק כאן לפני שאתה קונה",
+      h("form", { class: "toolbar", onsubmit: go }, h("div", { class: "search" }, input, icon("search", 18)), h("div", { class: "search" }, isin),
+        h("button", { type: "submit", class: "btn primary" }, "בדוק"))),
+    out));
+  if (!sym) { out.append(empty("הכנס סימול כדי לבדוק נזילות, קפיצות מחזור, קריסות קודמות ועלייה פרבולית.")); return; }
+  const [symbol, qs] = sym.split("?");
+  const isinQ = new URLSearchParams(qs || "").get("isin");
+  if (isinQ) isin.value = isinQ;
+  input.value = symbol;
+  out.append(skel(3));
+  let r;
+  try { r = await api(`/api/check/${encodeURIComponent(symbol)}` + (isinQ ? `?isin=${encodeURIComponent(isinQ)}` : "")); }
+  catch (e) { if (current === "check") out.replaceChildren(fail(e)); return; }
+  if (current !== "check") return;
+  const [cls, label] = VERDICT[r.verdict] || VERDICT.unknown;
+  const m = r.metrics || {};
+  out.replaceChildren(
+    h("div", { class: "card" }, h("div", { class: "sub" }, ltr(r.symbol), r.name ? " · " + r.name : "", r.exchange ? " · " + r.exchange : ""),
+      h("div", { style: "margin:10px 0" }, h("div", { class: "badge " + cls, style: "font-size:16px;padding:8px 14px;white-space:normal;display:block;line-height:1.4" }, label)),
+      r.flags.length ? h("ul", { class: "clean" }, r.flags.map((f) => h("li", null,
+        h("span", { class: "dot " + (f.level === "red" ? "bad" : "warn") }), " ", f.text))) : null,
+      h("p", { class: "faint" }, r.disclaimer)),
+    r.bars && r.bars.length > 1 ? card("מחיר בשנה האחרונה", r.source, priceChart(r.bars)) : null,
+    m.last != null ? h("div", { class: "kpis" },
+      kpi("מחיר אחרון", ltr("$" + m.last.toFixed(2))),
+      kpi("מחזור יומי חציוני", ltr(usd(m.median_dollar_volume_20d)), "20 ימים"),
+      kpi("הירידה הגרועה ביום אחד", ltr(pct(m.worst_day, 0), "down"), m.worst_day_date || ""),
+      kpi("מהשפל של 60 יום", ltr(pct(m.from_60d_low, 0), m.from_60d_low >= 0 ? "up" : "down"))) : null,
+    card("איך מזהים תרגיל pump", null, h("ul", { class: "clean" },
+      h("li", null, "מבטיחים תשואה מדויקת בזמן קצר (\"10–20% בשבוע\")."),
+      h("li", null, "כולם מקבלים אותו מחיר כניסה באותו רגע."),
+      h("li", null, "מבקשים צילום מסך של ההוראה או של הביצוע."),
+      h("li", null, "מניה קטנה, לרוב רשומה באיים (קיימן, BVI), עם מחזור זעיר."),
+      h("li", null, "\"עמלה מהרווחים\" שתשלם להם בהמשך."))));
+};
 
 // ---- ETF paper study v2 ----
 const REASON = { already_held: "כבר מוחזק", liquidity_or_price: "נזילות/מחיר", drawdown_halt: "עצירה: ירידה 8% מהשיא",

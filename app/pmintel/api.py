@@ -316,3 +316,19 @@ def etf_latest():
     rows = q("""SELECT id, created_at, result FROM research_reports
                 WHERE kind = 'etf_paper_v2' ORDER BY id DESC LIMIT 1""")
     return rows[0] if rows else None
+
+
+@app.get("/api/check/{symbol}")
+def check_stock(symbol: str, isin: str | None = Query(None, max_length=12)):
+    """Red-flag check of one stock from Yahoo daily bars (10-minute cache)."""
+    from . import stockcheck
+    sym = symbol.strip().upper()
+    if not stockcheck.SYMBOL_RE.match(sym):
+        raise HTTPException(400, "invalid symbol")
+    try:
+        bars, meta = cached(("check", sym), 600, lambda: stockcheck.fetch(sym))
+    except LookupError:
+        raise HTTPException(404, "symbol not found") from None
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"price data unavailable: {type(e).__name__}") from None
+    return {"symbol": sym, "source": "Yahoo Finance daily bars (1y)", **stockcheck.assess(bars, meta, isin)}
