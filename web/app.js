@@ -99,6 +99,7 @@ const ROUTES = [
   { id: "scanner", path: "#/scanner", label: "סורק הזדמנויות", short: "הזדמנויות", icon: "radar", nav: "both" },
   { id: "watchlist", path: "#/watchlist", label: "רשימת מעקב", short: "מעקב", icon: "star", nav: "both" },
   { id: "research", path: "#/research", label: "מעבדת מחקר", icon: "lab", nav: "side" },
+  { id: "etf", path: "#/etf", label: "חדר מסחר ETF (נייר)", icon: "wallet", nav: "side" },
   { id: "portfolio", path: "#/portfolio", label: "תיק נייר", icon: "wallet", nav: "side", soon: true },
   { id: "alerts", path: "#/alerts", label: "התראות", icon: "bell", nav: "side", soon: true },
   { id: "system", path: "#/system", label: "בריאות המערכת", icon: "pulse", nav: "side" },
@@ -121,7 +122,7 @@ function route() {
   if (m) { id = "detail"; arg = decodeURIComponent(m[1]); }
   else { const r = ROUTES.find((x) => x.path === hash); if (r) id = r.id; }
   current = id;
-  const navId = id === "detail" ? "markets" : (["research", "portfolio", "alerts", "system"].includes(id) && innerWidth < 960 ? "more" : id);
+  const navId = id === "detail" ? "markets" : (["research", "etf", "portfolio", "alerts", "system"].includes(id) && innerWidth < 960 ? "more" : id);
   document.querySelectorAll("[data-route]").forEach((a) => a.toggleAttribute("aria-current", false));
   document.querySelectorAll(`[data-route="${navId}"], #side-nav [data-route="${id === "detail" ? "markets" : id}"]`)
     .forEach((a) => a.setAttribute("aria-current", "page"));
@@ -496,6 +497,83 @@ function reliability(buckets) {
       s("circle", { cx: X(b.mean_price), cy: Y(b.freq), r: 3 + 6 * Math.sqrt(b.n / maxN), fill: "#5B9BFF", "fill-opacity": 0.85 })]));
 }
 
+// ---- ETF paper study v2 ----
+const REASON = { already_held: "כבר מוחזק", liquidity_or_price: "נזילות/מחיר", drawdown_halt: "עצירה: ירידה 8% מהשיא",
+  daily_loss: "הפסד יומי 1%", health_data: "נתונים חסרים", health_clock: "שעון השרת לא מסונכרן", position_count: "כבר 5 פוזיציות",
+  execution_bar_missing: "אין מחיר ביצוע", invalid_stop: "סטופ לא תקין", below_min_order: "מתחת ל-$10",
+  gap_stop: "פתיחה מתחת לסטופ", stop: "סטופ", rule_exit: "אות יציאה", time_exit: "זמן החזקה מקסימלי",
+  intent_missing: "לא נרשמה החלטה לפני הפתיחה", intent_late: "ההחלטה נרשמה מאוחר" };
+const ACCT = { trend: "מגמה (Trend)", breakout: "פריצה (Breakout)" };
+const money = (v) => num(v) == null ? "—" : "$" + Number(v).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function equityChart(series) {
+  const W = 800, H = 260, P = { t: 12, r: 10, b: 24, l: 56 };
+  const all = series.flatMap((x) => x.curve.map((p) => p.equity));
+  if (!all.length) return empty("עוד אין ימי מסחר בחלון הניסוי.");
+  const n = Math.max(...series.map((x) => x.curve.length));
+  let y0 = Math.min(...all, 3000), y1 = Math.max(...all, 3000); const pad = Math.max(15, (y1 - y0) * 0.1); y0 -= pad; y1 += pad;
+  const X = (i) => P.l + (n > 1 ? i / (n - 1) : 0.5) * (W - P.l - P.r), Y = (v) => P.t + (1 - (v - y0) / (y1 - y0)) * (H - P.t - P.b);
+  return h("div", { class: "chart-wrap" }, s("svg", { class: "chart", direction: "ltr", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", role: "img", "aria-label": "שווי החשבונות לאורך הניסוי" },
+    [y0 + pad, 3000, y1 - pad].map((v) => [s("line", { x1: P.l, x2: W - P.r, y1: Y(v), y2: Y(v), stroke: "#243041" }),
+      s("text", { x: P.l - 6, y: Y(v) + 4, "text-anchor": "end", "font-size": 11, fill: "#6F8094" }, "$" + Math.round(v).toLocaleString("en"))]),
+    series.map((x) => s("path", { d: x.curve.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p.equity).toFixed(1)}`).join(""),
+      fill: "none", stroke: x.color, "stroke-width": 2, "stroke-dasharray": x.dash || "", "vector-effect": "non-scaling-stroke" }))),
+    h("div", { class: "faint", style: "display:flex;gap:16px;flex-wrap:wrap;margin-top:6px" },
+      series.map((x) => h("span", null, h("span", { style: `display:inline-block;width:14px;height:3px;background:${x.color};vertical-align:middle;margin-inline-end:6px` }), x.name))));
+}
+PAGES.etf = async (view) => {
+  const r = await api("/api/etf/latest");
+  if (current !== "etf") return;
+  if (!r) { view.replaceChildren(empty("הניסוי עוד לא רץ. הריצה הראשונה מתבצעת אחרי סגירת המסחר בארה״ב (00:15 שעון ישראל).")); return; }
+  const R = r.result, P = R.protocol, b = R.benchmark_spy;
+  const accts = Object.values(R.accounts);
+  const kpis = h("div", { class: "kpis" },
+    accts.map((a) => kpi(ACCT[a.account] || a.account, h("span", null, ltr(money(a.liquidated_equity)), " ", ltr(pct(a.return, 2), a.return >= 0 ? "up" : "down")),
+      `${a.filled_entries} כניסות · ${a.closed_trades} עסקאות סגורות · ירידה מקס׳ ${pct(a.max_drawdown, 1)}`)),
+    kpi("SPY (פשוט להחזיק)", b ? h("span", null, ltr(money(b.liquidated_equity)), " ", ltr(pct(b.return, 2), b.return >= 0 ? "up" : "down")) : "—", "הרף שצריך לנצח"),
+    kpi("ימי מסחר בניסוי", ltr(String(R.sessions)), `${dateHe(P.window_start)} → ${dateHe(P.window_end)}`));
+  const series = [
+    ...accts.map((a, i) => ({ name: ACCT[a.account] || a.account, curve: a.curve, color: ["#5B9BFF", "#F0B14A"][i % 2] })),
+    ...(b ? [{ name: "SPY", curve: b.curve, color: "#9AA9BB", dash: "5 4" }] : [])];
+  const posRows = accts.flatMap((a) => a.open_positions.map((p) => h("tr", null, h("td", null, ACCT[a.account]), h("td", null, ltr(p.symbol)),
+    h("td", null, ltr(p.quantity.toFixed(3))), h("td", null, ltr(money(p.entry))), h("td", null, ltr(money(p.stop))),
+    h("td", null, ltr(money(p.unrealized_pnl), p.unrealized_pnl >= 0 ? "up" : "down")))));
+  const decRows = accts.flatMap((a) => a.decisions.filter((d) => !(d.reasons || []).includes("already_held")).map((d) => ({ ...d, account: a.account })))
+    .sort((x, y) => y.session.localeCompare(x.session)).slice(0, 30).map((d) => h("tr", null,
+      h("td", null, dateHe(d.session)), h("td", null, ACCT[d.account]), h("td", null, ltr(d.symbol)),
+      h("td", null, d.status === "filled" ? h("span", { class: "badge ok" }, "נקנה") : h("span", { class: "badge" }, "נדחה")),
+      h("td", null, d.status === "filled" ? h("span", null, ltr(`${d.quantity.toFixed(3)} × ${money(d.entry)}`), " · סיכון ", ltr(money(d.initial_risk)))
+        : d.reasons.map((x) => REASON[x] || x).join(", "))));
+  const trRows = accts.flatMap((a) => a.trades.map((t) => ({ ...t, account: a.account }))).sort((x, y) => y.exit_session.localeCompare(x.exit_session))
+    .map((t) => h("tr", null, h("td", null, dateHe(t.exit_session)), h("td", null, ACCT[t.account]), h("td", null, ltr(t.symbol)),
+      h("td", null, REASON[t.reason] || t.reason), h("td", null, ltr(money(t.pnl), t.pnl >= 0 ? "up" : "down"))));
+  const missed = accts.flatMap((a) => a.missed_sessions.map((m) => `${dateHe(m.session)} · ${ACCT[a.account]}: ${REASON[m.reason] || m.reason}`));
+  const table = (head, rows, none) => rows.length ? h("div", { class: "scroll-x" }, h("table", { class: "t" },
+    h("thead", null, h("tr", null, head.map((x) => h("th", null, x)))), h("tbody", null, rows))) : empty(none);
+  const hl = R.health || {};
+  view.replaceChildren(h("div", { class: "stack" },
+    h("div", { class: "card", style: "border-color:#3A2E14" }, h("strong", null, "כסף מדומה בלבד. "),
+      `כל חשבון מתחיל ב-${money(P.initial_capital)}. אין חיבור לברוקר ואין פקודות אמיתיות. הכללים נקבעו מראש ולא משתנים לפי התוצאות. ניסוי v1 הקודם נשאר רשום כנכשל.`),
+    kpis,
+    card("שווי החשבונות", "אחרי עמלות של 0.05% לכל צד; SPY כולל דיבידנדים", equityChart(series)),
+    card("פוזיציות פתוחות", null, table(["חשבון", "ETF", "כמות", "כניסה", "סטופ", "רווח/הפסד"], posRows, "אין פוזיציות פתוחות.")),
+    card("החלטות אחרונות", "כולל מה נדחה ולמה (בלי \"כבר מוחזק\")", table(["תאריך", "חשבון", "ETF", "", "פרטים"], decRows, "עוד אין החלטות.")),
+    card("עסקאות שנסגרו", null, table(["תאריך", "חשבון", "ETF", "סיבה", "רווח/הפסד"], trRows, "עוד לא נסגרו עסקאות.")),
+    card("בריאות הניסוי", `עודכן ${ago(r.created_at)}`,
+      h("ul", { class: "clean" },
+        h("li", null, "נר אחרון: ", dateHe(R.latest_bar)),
+        h("li", null, "שעון השרת: ", hl.clock_ok ? h("span", { class: "badge ok" }, "תקין") : h("span", { class: "badge bad" }, "לא תקין"),
+          hl.clock_skew_s == null ? "" : h("span", { class: "faint" }, " סטייה ", ltr(hl.clock_skew_s.toFixed(1) + "s"))),
+        h("li", null, "החלטות שנחתמו: ", ltr(String(R.intents_total))),
+        (hl.fetch_problems || []).length ? h("li", { class: "err" }, "בעיות הורדה: " + hl.fetch_problems.join(", ")) : null),
+      missed.length ? h("div", null, h("div", { class: "sub" }, "ימים שהוחמצו (לא נכנסו עסקאות חדשות):"), h("ul", { class: "clean" }, missed.map((m) => h("li", null, m)))) : null),
+    card("כללי הניסוי", P.version,
+      h("ul", { class: "clean" },
+        h("li", null, "7 קרנות: SPY, QQQ, IWM, EFA, EEM, IEF, TLT. החלטה אחרי הסגירה, ביצוע בפתיחה הבאה."),
+        h("li", null, "מגמה: מעל ממוצע 200 יום ותשואת חצי שנה חיובית. פריצה: מעל ממוצע 200 ומעל שיא 55 יום."),
+        h("li", null, "עד 5 פוזיציות, עד 20% לקרן, עד 60% מושקע, סיכון 0.25% מהחשבון לעסקה, סטופ 2×ATR."),
+        h("li", null, "חלקי מניות (0.001) — כך שגם QQQ יקרה אפשרית. עצירת כניסות בירידה של 8% מהשיא.")))));
+};
+
 // ---- Coming soon (honest) ----
 PAGES.portfolio = (view) => view.replaceChildren(card("תיק נייר", "עוד לא פעיל",
   h("p", { class: "sub" }, "יופעל רק לאסטרטגיה שעברה את המחקר ההיסטורי. כל עסקת נייר תתועד במחיר ביצוע אמיתי מספר הפקודות, עם עלויות."),
@@ -509,7 +587,7 @@ PAGES.more = (view) => view.replaceChildren(h("div", { class: "stack" },
 
 // ---- System Health ----
 const JOBS = { collect: "איסוף נזילים (15 דק׳)", collect_full: "סריקה מלאה", orderbooks: "ספרי פקודות", sync_closed: "סנכרון שווקים שנסגרו",
-  backfill: "Backfill היסטורי", research: "דוח מחקר" };
+  backfill: "Backfill היסטורי", research: "דוח מחקר", etf_paper: "ניסוי ETF (נייר)" };
 PAGES.system = async (view) => {
   const [hl, integ] = await Promise.all([api("/api/health"), api("/api/integration/latest").catch(() => null)]);
   if (current !== "system") return;

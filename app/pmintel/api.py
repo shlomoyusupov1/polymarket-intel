@@ -308,3 +308,11 @@ def report_latest():
     rows = q("""SELECT id, created_at, result FROM research_reports
                 WHERE kind = 'research_report_v1' ORDER BY id DESC LIMIT 1""")
     return rows[0] if rows else None
+
+
+@app.get("/api/etf/latest")
+def etf_latest():
+    """Latest ETF paper study v2 replay (paper only; see docs/ETF_PAPER_V2_PROTOCOL.md)."""
+    rows = q("""SELECT id, created_at, result FROM research_reports
+                WHERE kind = 'etf_paper_v2' ORDER BY id DESC LIMIT 1""")
+    return rows[0] if rows else None

@@ -32,6 +32,11 @@ services:
     <<: *app
     command: ["python", "-m", "pmintel.collector"]
 
+  # ETF paper study v2: runs after the US close on weekdays (paper only, no broker)
+  etf:
+    <<: *app
+    command: ["python", "-m", "pmintel.etf_job"]
+
   api:
     <<: *app
     command: ["uvicorn", "pmintel.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

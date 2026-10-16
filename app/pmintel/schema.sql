@@ -134,3 +134,30 @@ BEGIN
         END;
     END IF;
 END $$;
+
+-- ETF paper study v2 (docs/ETF_PAPER_V2_PROTOCOL.md). First-seen bars are never overwritten,
+-- so a later data revision cannot change a sealed decision or its fill.
+CREATE TABLE IF NOT EXISTS etf_bars (
+    symbol     text NOT NULL,
+    day        date NOT NULL,
+    o double precision NOT NULL, h double precision NOT NULL,
+    l double precision NOT NULL, c double precision NOT NULL, v double precision NOT NULL,
+    fetched_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (symbol, day)
+);
+CREATE TABLE IF NOT EXISTS etf_dividends (
+    symbol     text NOT NULL,
+    ex_date    date NOT NULL,
+    amount     double precision NOT NULL,
+    fetched_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (symbol, ex_date)
+);
+-- one sealed intent per account per decision bar; never updated
+CREATE TABLE IF NOT EXISTS etf_intents (
+    account    text NOT NULL,
+    based_on   date NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    sha256     text NOT NULL,
+    payload    jsonb NOT NULL,
+    PRIMARY KEY (account, based_on)
+);

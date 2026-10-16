@@ -38,7 +38,9 @@ class ApiClient:
                 continue
             if r.status_code in RETRY_STATUS and attempt < self.max_retries:
                 ra = r.headers.get("Retry-After")
-                delay = float(ra) if ra and ra.replace(".", "", 1).isdigit() else self.backoff * 2 ** attempt
+                delay = self.backoff * 2 ** attempt
+                if ra and ra.replace(".", "", 1).isdigit():
+                    delay = max(delay, float(ra))  # "Retry-After: 0" must not mean hammering
                 log.warning("HTTP %s on %s, retry in %.1fs", r.status_code, url, delay)
                 self.sleep(delay)
                 continue

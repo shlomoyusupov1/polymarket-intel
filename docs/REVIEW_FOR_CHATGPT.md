@@ -109,6 +109,14 @@ Scanner, Research Lab, System Health; honest "not active" Portfolio/Alerts. Live
 endpoints. Verified with Playwright on desktop and iPhone sizes against a `[TEST]`-labelled local stack
 (screenshots in `docs/screenshots/`); production screenshots pending the next deploy.
 
+## 3d. ETF paper study v2 — pre-registered, see `docs/ETF_PAPER_V2_PROTOCOL.md`
+
+New separate study (v1 stays failed): $3,000 per account (owner's choice), fractional shares, a
+health gate the VM can actually satisfy, first-seen bar storage, sealed intents, SPY total-return
+benchmark. Service `etf` runs after each US close; UI page `#/etf`. Window 2026-10-19 → 2027-04-16.
+Tests: sizing of a >$700 ETF, late/missing intents, health veto, stops/accounting, dividends,
+first-seen bars and one-time sealing against Postgres. Real-data run pending on the server.
+
 ## 4. What I'd like challenged
 1. Keyset `after_cursor` name was inferred from a third-party Go client; production scan passed, but
    please confirm against official docs.
