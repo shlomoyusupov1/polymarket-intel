@@ -205,3 +205,17 @@ CREATE TABLE IF NOT EXISTS sec_index_done (
     buys     integer,
     done_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- SEC events: Schedule 13D and earnings 8-Ks (pmintel/sec_events.py)
+CREATE TABLE IF NOT EXISTS sec_events (
+    accession    text PRIMARY KEY,
+    kind         text NOT NULL,            -- 13d | earnings
+    symbol       text NOT NULL,
+    accepted     timestamptz NOT NULL,
+    reaction_day date,
+    reaction     double precision,
+    excess       double precision,
+    signal       boolean,
+    evaluated_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS sec_events_done (day date PRIMARY KEY, done_at timestamptz NOT NULL DEFAULT now());

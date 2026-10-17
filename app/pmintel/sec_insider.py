@@ -45,7 +45,7 @@ class Sec:
             if wait > 0:
                 self.sleep(wait)
             self._last = time.monotonic()
-            r = self.client.get(BASE + path)
+            r = self.client.get(path if path.startswith("http") else BASE + path)
             if r.status_code == 404:
                 return None
             if r.status_code in (429, 503):

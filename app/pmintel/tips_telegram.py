@@ -58,7 +58,9 @@ async def outcome_loop(conn):
     """Every 6 h: new SEC insider purchases (last 5 days), then outcomes for all recent tips."""
     from . import sec_insider
     while True:
+        from . import sec_events
         for name, fn in (("sec", lambda: sec_insider.run(conn, sec_insider.Sec(), 5)),
+                         ("sec_events", lambda: sec_events.run(conn, sec_insider.Sec(), 5)),
                          ("outcomes", lambda: tips.update_outcomes(conn))):
             try:
                 res = await asyncio.to_thread(fn)
