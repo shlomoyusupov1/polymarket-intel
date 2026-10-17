@@ -183,3 +183,7 @@ CREATE TABLE IF NOT EXISTS tips (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS tips_msg_uq ON tips (chat_id, message_id, symbol) WHERE message_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS tips_source_idx ON tips (source, ts DESC);
+-- same-window SPY returns, so a tip is judged against simply holding the market
+ALTER TABLE tips ADD COLUMN IF NOT EXISTS spy_r1 double precision;
+ALTER TABLE tips ADD COLUMN IF NOT EXISTS spy_r5 double precision;
+ALTER TABLE tips ADD COLUMN IF NOT EXISTS spy_r20 double precision;

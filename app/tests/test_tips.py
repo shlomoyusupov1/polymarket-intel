@@ -52,7 +52,10 @@ def test_record_dedup_outcomes_and_api(monkeypatch):
     assert tips.record(conn, "Group A", "PSIG", ts, 4.21, kind="telegram", chat_id="1", message_id="9")
     assert tips.record(conn, "Group A", "PSIG", ts, 4.21) is None  # same source+symbol within 24 h
     assert tips.record(conn, "Group B", "PSIG", ts) is not None
-    assert tips.update_outcomes(conn, fetch=lambda s: (b, {})) == 2
+    spy = bars(DAYS, [100] * 10, [101, 102, 103, 104, 105, 106, 107, 108, 109, 110])
+    assert tips.update_outcomes(conn, fetch=lambda s: (spy if s == "SPY" else b, {})) == 2
+    spy_r5 = conn.execute("SELECT spy_r5 FROM tips WHERE source='Group A'").fetchone()[0]
+    assert abs(spy_r5 - (106 / 100 - 1)) < 1e-9  # same sessions as the tip: 13.10 open -> 19.10 close
     r5 = conn.execute("SELECT r5 FROM tips WHERE source='Group A'").fetchone()[0]
     assert abs(r5 - (1.2 / 4.2 - 1)) < 1e-9  # entry 13.10 open, 5th session close 19.10
     monkeypatch.setattr(config, "DATABASE_URL", DB)
@@ -61,6 +64,8 @@ def test_record_dedup_outcomes_and_api(monkeypatch):
     with TestClient(api.app) as tc:
         ov = tc.get("/api/tips").json()
         assert {r["source"] for r in ov["leaderboard"]} == {"Group A", "Group B"}
+        a = next(r for r in ov["leaderboard"] if r["source"] == "Group A")
+        assert abs(a["excess_r5"] - ((1.2 / 4.2 - 1) - 0.06)) < 1e-9 and a["beat_spy_5d"] == 0
         assert ov["recent"][0]["symbol"] == "PSIG"
         assert tc.post("/api/tips", json={"symbol": "psig", "source": "וואטסאפ הילה", "price": 4.21}).status_code == 201
         assert tc.post("/api/tips", json={"symbol": "psig", "source": "וואטסאפ הילה"}).status_code == 409

@@ -351,7 +351,7 @@ def tips_overview():
     recent = q("""SELECT id, source, kind, ts, symbol, mentioned_price, verdict, flags, entry_day, entry_price,
                          r1, r5, r20, max_drawdown_20, max_runup_20 FROM tips ORDER BY ts DESC LIMIT 100""")
     return {"leaderboard": board, "recent": recent,
-            "rule": "כניסה בפתיחה הראשונה אחרי הטיפ; תשואה בסגירה אחרי 1/5/20 ימי מסחר; בלי עמלות"}
+            "rule": "כניסה בפתיחה הראשונה אחרי הטיפ; תשואה בסגירה אחרי 1/5/20 ימי מסחר; \"מול SPY\" = הטיפ פחות SPY באותם ימים בדיוק; בלי עמלות"}
 
 
 @app.post("/api/tips", status_code=201)
