@@ -22,6 +22,15 @@ server); the exact commands that produce it are below and nothing in this report
 
 Tests: **79 passed** locally (Postgres 16); CI runs the same suite.
 
+## Added after review: reliability gate for every signal source
+
+The owner's target is a source that wins about 60% of the time. "Win" is defined strictly: the tip beat
+SPY over the same 5 trading days after a 0.2% round-trip cost. A source is **reliable** only with ≥ 50
+measured tips, ≥ 60% wins whose 95% Wilson lower bound is above 50%, and a positive average edge whose
+lower bound is above 0 when each symbol counts once. Otherwise: collecting (< 30), promising (≥ 55% and
+positive mean, not proven) or not reliable. Shown in the source leaderboard
+(`docs/screenshots/sprint-*-source-gate.png`); tests in `test_tips.py`.
+
 ## Screenshots (local stack, `[TEST]`-labelled data — not production)
 
 - `docs/screenshots/sprint-desktop-evidence.png`, `sprint-mobile-evidence.png`

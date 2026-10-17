@@ -79,3 +79,20 @@ def test_group_matching_uses_the_marked_id_from_list_chats():
     assert matches(-1001209544486, "אינטראקטיב ישראל", wanted)
     assert matches(-1001239039686, "שוק ההון כלכליסט", wanted)
     assert not matches(1209544486, "x", wanted)  # bare entity id is not what --list-chats prints
+
+
+def test_source_gate_needs_sample_consistency_and_breadth():
+    import random
+    rnd = random.Random(3)
+    assert tips.source_gate([("A", 0.05, 0.0)] * 10)["status"] == "collecting"
+    # 60 tips on 30 symbols, ~75% beat SPY by 2% after costs -> reliable
+    good = [(f"S{i % 30}", (0.03 if rnd.random() < 0.75 else -0.01), 0.0) for i in range(60)]
+    g = tips.source_gate(good)
+    assert g["status"] == "reliable" and g["success_rate"] >= 0.6 and g["success_lo95"] > 0.5
+    # 60% raw win rate but tiny sample of one hyped symbol -> not reliable (breadth/CI)
+    one = [("PUMP", 0.10 if i % 5 < 3 else -0.15, 0.0) for i in range(60)]
+    assert tips.source_gate(one)["status"] != "reliable"
+    # coin flip -> not reliable
+    flip = [(f"S{i}", (0.01 if rnd.random() < 0.5 else -0.01), 0.0) for i in range(80)]
+    assert tips.source_gate(flip)["status"] in ("not_reliable", "promising")
+    assert tips.source_gate(flip)["status"] != "reliable"

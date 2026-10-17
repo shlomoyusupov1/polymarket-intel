@@ -159,7 +159,53 @@ def leaderboard(conn) -> list[dict]:
                count(r20), avg(r20), avg(r20 - spy_r20), min(max_drawdown_20),
                avg(CASE WHEN verdict = 'red' THEN 1.0 WHEN verdict IS NOT NULL THEN 0.0 END), max(ts)
         FROM tips GROUP BY source ORDER BY count(*) DESC""").fetchall()
-    return [dict(zip(cols, r)) for r in rows]
+    per_source: dict[str, list] = {}
+    for src, sym, r5, spy in conn.execute("SELECT source, symbol, r5, spy_r5 FROM tips").fetchall():
+        per_source.setdefault(src, []).append((sym, r5, spy))
+    return [{**dict(zip(cols, r)), "gate": source_gate(per_source.get(r[0], []))} for r in rows]
+
+
+ROUND_TRIP_COST = 0.002  # 0.2% per round trip; real OTC costs are higher
+GATE = {"min_n": 50, "win_rate": 0.60}
+
+
+def _wilson_lo(k: int, n: int, z: float = 1.96) -> float:
+    if n == 0:
+        return 0.0
+    import math
+    p = k / n
+    d = 1 + z * z / n
+    return max(0.0, (p + z * z / (2 * n) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / d)
+
+
+def source_gate(rows: list[tuple]) -> dict:
+    """rows: (symbol, r5, spy_r5) for one source. 'Success' = beat SPY over the same 5 sessions
+    after a round-trip cost. 'reliable' needs >= 50 measured tips, >= 60% success whose 95% lower
+    bound is above 50% (not luck), and a positive average edge whose lower bound is above 0 when each
+    symbol counts once (so one hyped stock posted 20 times can't carry a source)."""
+    import math
+    m = [(sym, r - s_ - ROUND_TRIP_COST) for sym, r, s_ in rows if r is not None and s_ is not None]
+    n = len(m)
+    k = sum(1 for _, x in m if x > 0)
+    by_sym: dict[str, list[float]] = {}
+    for sym, x in m:
+        by_sym.setdefault(sym, []).append(x)
+    per = [sum(v) / len(v) for v in by_sym.values()]
+    mean = sum(per) / len(per) if per else None
+    se = (math.sqrt(sum((x - mean) ** 2 for x in per) / (len(per) - 1)) / math.sqrt(len(per))) if len(per) > 1 else None
+    win = k / n if n else None
+    lo = _wilson_lo(k, n)
+    if n < 30:
+        status = "collecting"
+    elif n >= GATE["min_n"] and win >= GATE["win_rate"] and lo > 0.5 and se and mean - 1.96 * se > 0:
+        status = "reliable"
+    elif win >= 0.55 and mean and mean > 0:
+        status = "promising"
+    else:
+        status = "not_reliable"
+    return {"n": n, "symbols": len(per), "success_rate": win, "success_lo95": lo if n else None,
+            "edge_after_cost": mean, "edge_lo95": (mean - 1.96 * se) if se else None, "status": status,
+            "rule": "success = beat SPY over the same 5 trading days after 0.2% round-trip cost"}
 
 
 def utcnow() -> datetime:

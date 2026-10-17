@@ -667,7 +667,10 @@ PAGES.tips = async (view) => {
     h("button", { type: "submit", class: "btn primary" }, "רשום טיפ"));
   const table = (head, rows, none) => rows.length ? h("div", { class: "scroll-x" }, h("table", { class: "t" },
     h("thead", null, h("tr", null, head.map((x) => h("th", null, x)))), h("tbody", null, rows))) : empty(none);
-  const board = d.leaderboard.map((r) => h("tr", null, h("td", null, r.source), h("td", null, ltr(String(r.tips))),
+  const GATE = { reliable: ["ok", "אמין"], promising: ["wait", "מבטיח — עוד לא מוכח"], not_reliable: ["bad", "לא אמין"], collecting: ["", "צובר נתונים"] };
+  const gateCell = (g) => { if (!g) return "—"; const [c, l] = GATE[g.status] || ["", g.status];
+    return h("div", null, h("span", { class: "badge " + c }, l), g.n ? h("div", { class: "faint" }, ltr(`${pct(g.success_rate, 0)} (≥${pct(g.success_lo95, 0)}) · n=${g.n}`)) : null); };
+  const board = d.leaderboard.map((r) => h("tr", null, h("td", null, r.source), h("td", null, gateCell(r.gate)), h("td", null, ltr(String(r.tips))),
     h("td", null, ltr(String(r.measured_5d))), h("td", null, pctCell(r.median_r5)), h("td", null, r.win_rate_5d == null ? "—" : ltr(pct(r.win_rate_5d, 0))),
     h("td", null, pctCell(r.excess_r5)), h("td", null, r.beat_spy_5d == null ? "—" : ltr(pct(r.beat_spy_5d, 0))),
     h("td", null, pctCell(r.avg_r20)), h("td", null, pctCell(r.worst_drawdown_20)), h("td", null, r.red_share == null ? "—" : ltr(pct(r.red_share, 0)))));
@@ -678,7 +681,7 @@ PAGES.tips = async (view) => {
     h("td", null, pctCell(t.r1)), h("td", null, pctCell(t.r5)), h("td", null, pctCell(t.r20)), h("td", null, pctCell(t.max_drawdown_20))); });
   view.replaceChildren(h("div", { class: "stack" },
     card("רישום טיפ ידני", "קיבלת המלצה בוואטסאפ? תרשום אותה כאן — המערכת תמדוד מה קרה אחרי", form, msg),
-    card("דירוג מקורות", d.rule, table(["מקור", "טיפים", "נמדדו (5 ימים)", "חציון 5 ימים", "הרוויחו", "מול SPY (5 ימים)", "ניצחו את SPY", "ממוצע 20 יום", "הירידה הגרועה", "אדומים"], board,
+    card("דירוג מקורות", d.rule + ". \"אמין\" = לפחות 50 טיפים, 60% ניצחו את SPY, והתוצאה לא מקרית (גבול תחתון מעל 50%)", table(["מקור", "אמינות (ניצח SPY אחרי עלויות)", "טיפים", "נמדדו (5 ימים)", "חציון 5 ימים", "הרוויחו", "מול SPY (5 ימים)", "ניצחו את SPY", "ממוצע 20 יום", "הירידה הגרועה", "אדומים"], board,
       "עוד אין טיפים. רשום ידנית, או חבר את טלגרם (הוראות ב-README).")),
     card("טיפים אחרונים", "לחיצה על סימול פותחת את בודק המניות", table(["זמן", "מקור", "סימול", "סיכון", "כניסה", "יום", "5 ימים", "20 יום", "ירידה מקס׳"], recent, "—")),
     h("p", { class: "faint" }, "נמדד בלי עמלות ובלי החלקה — בפועל התוצאה הייתה גרועה יותר, במיוחד במניות OTC. אין כאן המלצה לקנות דבר.")));
