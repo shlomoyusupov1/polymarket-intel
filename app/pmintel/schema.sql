@@ -219,3 +219,15 @@ CREATE TABLE IF NOT EXISTS sec_events (
     evaluated_at timestamptz
 );
 CREATE TABLE IF NOT EXISTS sec_events_done (day date PRIMARY KEY, done_at timestamptz NOT NULL DEFAULT now());
+
+-- host resources sampled every collector cycle (pmintel/hostmetrics.py)
+CREATE TABLE IF NOT EXISTS host_metrics (
+    ts            timestamptz NOT NULL DEFAULT now(),
+    cpu_pct       double precision,
+    load1         double precision, load5 double precision, load15 double precision,
+    cpus          integer,
+    mem_total     bigint, mem_available bigint,
+    disk_total    bigint, disk_used bigint,
+    db_bytes      bigint
+);
+CREATE INDEX IF NOT EXISTS host_metrics_ts_idx ON host_metrics (ts DESC);

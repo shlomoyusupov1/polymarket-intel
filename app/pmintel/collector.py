@@ -7,7 +7,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import config, db, research
+from . import config, db, hostmetrics, research
 from .orderbook import summarize
 from .normalize import normalize_market
 from .sources import Clob, Gamma
@@ -112,6 +112,10 @@ def main() -> None:
             collect_orderbooks(conn, clob, out["records"], datetime.now(timezone.utc))
         except Exception:
             log.exception("collect failed")
+        try:
+            hostmetrics.record(conn)
+        except Exception:
+            log.exception("host metrics failed")
         today = datetime.now(timezone.utc)
         if today.hour >= config.RESEARCH_HOUR_UTC and last_daily != today.date():
             last_daily = today.date()
