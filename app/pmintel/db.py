@@ -16,7 +16,7 @@ MARKET_COLS = [
     "active", "closed", "neg_risk", "resolution_status", "resolved_outcome", "resolution_source",
     "description", "url", "outcome_prices", "accepting_orders", "enable_order_book", "archived",
     "neg_risk_market_id", "fees_enabled", "one_day_change", "one_week_change", "volume_1wk",
-    "group_item_title", "neg_risk_other",
+    "group_item_title", "neg_risk_other", "source_updated_at", "rules_hash",
 ]
 
 SNAP_COLS = ["ref_price", "best_bid", "best_ask", "spread", "volume", "volume_24h", "liquidity"]
@@ -54,27 +54,34 @@ def upsert_markets(conn: psycopg.Connection, records: list[dict]) -> int:
            f"ON CONFLICT (id) DO UPDATE SET {upd}, updated_at = now()")
     with conn.cursor() as cur:
         cur.executemany(sql, [_adapt(r) for r in records])
+        # every distinct version of the resolution terms, with the time we first saw it
+        cur.executemany("""INSERT INTO market_rules (market_id, rules_hash, description, resolution_source, end_date, outcomes)
+                           VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (market_id, rules_hash) DO NOTHING""",
+                        [(r["id"], r.get("rules_hash"), r.get("description"), r.get("resolution_source"),
+                          r.get("end_date"), Jsonb(r.get("outcomes") or [])) for r in records if r.get("rules_hash")])
     return len(records)
 
 
 def insert_snapshots(conn: psycopg.Connection, ts, records: list[dict]) -> int:
     if not records:
         return 0
-    sql = (f"INSERT INTO snapshots (ts, market_id, {', '.join(SNAP_COLS)}) "
-           f"VALUES (%s, %s, {', '.join(['%s'] * len(SNAP_COLS))}) ON CONFLICT DO NOTHING")
+    # ts = our ingest time; source_ts = Gamma's updatedAt for that market (source time)
+    sql = (f"INSERT INTO snapshots (ts, market_id, {', '.join(SNAP_COLS)}, source_ts) "
+           f"VALUES (%s, %s, {', '.join(['%s'] * len(SNAP_COLS))}, %s) ON CONFLICT DO NOTHING")
     with conn.cursor() as cur:
-        cur.executemany(sql, [[ts, r["id"], *[r.get(c) for c in SNAP_COLS]] for r in records])
+        cur.executemany(sql, [[ts, r["id"], *[r.get(c) for c in SNAP_COLS], r.get("source_updated_at")] for r in records])
     return len(records)
 
 
-def insert_price_history(conn: psycopg.Connection, market_id: str, token_id: str, points) -> int:
+def insert_price_history(conn: psycopg.Connection, market_id: str, token_id: str, points,
+                         source: str = "clob") -> int:
     if not points:
         return 0
     with conn.cursor() as cur:
         cur.executemany(
-            "INSERT INTO price_history (token_id, ts, market_id, price) VALUES (%s, %s, %s, %s) "
+            "INSERT INTO price_history (token_id, ts, market_id, price, source) VALUES (%s, %s, %s, %s, %s) "
             "ON CONFLICT DO NOTHING",
-            [(token_id, ts, market_id, p) for ts, p in points],
+            [(token_id, ts, market_id, p, source) for ts, p in points],
         )
     return len(points)
 
@@ -82,16 +89,22 @@ def insert_price_history(conn: psycopg.Connection, market_id: str, token_id: str
 @contextlib.contextmanager
 def job_run(conn: psycopg.Connection, job: str):
     """Record a job execution in job_runs so the System Health page reflects reality."""
+    # a previous run of the same job still marked 'running' after 12 h was killed: never count it as done
+    conn.execute("""UPDATE job_runs SET status = 'interrupted', finished_at = now()
+                    WHERE job = %s AND status = 'running' AND started_at < now() - interval '12 hours'""", (job,))
     run_id = conn.execute("INSERT INTO job_runs (job) VALUES (%s) RETURNING id", (job,)).fetchone()[0]
-    state = {"items": None}
+    state = {"items": None, "status": "ok", "detail": None}
     try:
         yield state
-    except Exception as e:
-        conn.execute("UPDATE job_runs SET finished_at = now(), status = 'error', error = %s, items = %s "
-                     "WHERE id = %s", (f"{type(e).__name__}: {e}"[:2000], state["items"], run_id))
+    except BaseException as e:  # incl. KeyboardInterrupt/SystemExit: the run did not complete
+        conn.execute("UPDATE job_runs SET finished_at = now(), status = %s, error = %s, items = %s, detail = %s "
+                     "WHERE id = %s", ("error" if isinstance(e, Exception) else "interrupted",
+                                       f"{type(e).__name__}: {e}"[:2000], state["items"],
+                                       Jsonb(state["detail"]) if state["detail"] is not None else None, run_id))
         raise
-    conn.execute("UPDATE job_runs SET finished_at = now(), status = 'ok', items = %s WHERE id = %s",
-                 (state["items"], run_id))
+    conn.execute("UPDATE job_runs SET finished_at = now(), status = %s, items = %s, detail = %s WHERE id = %s",
+                 (state["status"], state["items"], Jsonb(state["detail"]) if state["detail"] is not None else None,
+                  run_id))
 
 
 OB_COLS = ["best_bid", "best_ask", "spread", "bid_depth_5c", "ask_depth_5c",
@@ -100,6 +113,6 @@ OB_COLS = ["best_bid", "best_ask", "spread", "bid_depth_5c", "ask_depth_5c",
 
 def insert_orderbook(conn: psycopg.Connection, ts, market_id: str, token_id: str, summary: dict) -> None:
     conn.execute(
-        f"INSERT INTO orderbooks (ts, market_id, token_id, {', '.join(OB_COLS)}, levels, fetched_at) "
-        f"VALUES (%s, %s, %s, {', '.join(['%s'] * len(OB_COLS))}, %s, now()) ON CONFLICT DO NOTHING",
-        (ts, market_id, token_id, *[summary[c] for c in OB_COLS], Jsonb(summary["levels"])))
+        f"INSERT INTO orderbooks (ts, market_id, token_id, {', '.join(OB_COLS)}, levels, fetched_at, book_ts) "
+        f"VALUES (%s, %s, %s, {', '.join(['%s'] * len(OB_COLS))}, %s, now(), %s) ON CONFLICT DO NOTHING",
+        (ts, market_id, token_id, *[summary[c] for c in OB_COLS], Jsonb(summary["levels"]), summary.get("book_ts")))

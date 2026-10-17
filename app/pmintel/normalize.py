@@ -64,6 +64,16 @@ def resolved_outcome(outcomes: list, prices: list) -> str | None:
     return None  # unresolved, 50/50 split, or ambiguous
 
 
+def rules_hash(m: dict) -> str:
+    """Version of the resolution terms: any change to description, resolution source, end date or
+    outcomes yields a new hash (history kept in market_rules)."""
+    import hashlib
+    import json
+    key = json.dumps([m.get("description") or "", m.get("resolutionSource") or "", m.get("endDate") or "",
+                      [str(o) for o in _list(m.get("outcomes"))]], ensure_ascii=False)
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
 def normalize_market(m: dict) -> dict:
     outcomes = [str(o) for o in _list(m.get("outcomes"))]
     prices = [_float(p) for p in _list(m.get("outcomePrices"))]
@@ -126,4 +136,7 @@ def normalize_market(m: dict) -> dict:
         "group_item_title": m.get("groupItemTitle") or None,
         # the catch-all "Other" leg of an augmented negRisk event: its presence means new outcomes can appear
         "neg_risk_other": _bool(m.get("negRiskOther")),
+        # provenance: Gamma's own last-update time (source time) and the resolution-terms version
+        "source_updated_at": _ts(m.get("updatedAt")),
+        "rules_hash": rules_hash(m),
     }

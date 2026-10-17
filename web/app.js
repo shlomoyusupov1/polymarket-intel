@@ -100,6 +100,7 @@ const ROUTES = [
   { id: "scanner", path: "#/scanner", label: "סורק הזדמנויות", short: "הזדמנויות", icon: "radar", nav: "both" },
   { id: "watchlist", path: "#/watchlist", label: "רשימת מעקב", short: "מעקב", icon: "star", nav: "both" },
   { id: "research", path: "#/research", label: "מעבדת מחקר", icon: "lab", nav: "side" },
+  { id: "evidence", path: "#/evidence", label: "לוח ראיות — מניות במעקב", icon: "lab", nav: "side" },
   { id: "check", path: "#/check", label: "בודק מניות חשודות", icon: "shield", nav: "side" },
   { id: "tips", path: "#/tips", label: "מעקב טיפים", icon: "radar", nav: "side" },
   { id: "etf", path: "#/etf", label: "חדר מסחר ETF (נייר)", icon: "wallet", nav: "side" },
@@ -127,7 +128,7 @@ function route() {
   else if (mc) { id = "check"; arg = decodeURIComponent(mc[1]); }
   else { const r = ROUTES.find((x) => x.path === hash); if (r) id = r.id; }
   current = id;
-  const navId = id === "detail" ? "markets" : (["research", "check", "tips", "etf", "portfolio", "alerts", "system"].includes(id) && innerWidth < 960 ? "more" : id);
+  const navId = id === "detail" ? "markets" : (["research", "evidence", "check", "tips", "etf", "portfolio", "alerts", "system"].includes(id) && innerWidth < 960 ? "more" : id);
   document.querySelectorAll("[data-route]").forEach((a) => a.toggleAttribute("aria-current", false));
   document.querySelectorAll(`[data-route="${navId}"], #side-nav [data-route="${id === "detail" ? "markets" : id}"]`)
     .forEach((a) => a.setAttribute("aria-current", "page"));
@@ -362,11 +363,32 @@ PAGES.detail = async (view, id) => {
           h("div", { class: "detail-actions", style: "margin:8px 0" }, h("span", { class: "badge " + ({ good: "ok", limited: "wait", bad: "bad" }[dq.level]) },
             { good: "טובה", limited: "חלקית", bad: "לא מספקת" }[dq.level])),
           dq.issues.length ? h("ul", { class: "clean" }, dq.issues.map((i) => h("li", null, i))) : h("div", { class: "sub" }, "אין בעיות ידועות")),
+        priceTypesCard(m.prices, m.accepting_orders),
         h("section", { class: "card" }, h("h2", null, "ספר פקודות ומחיר ביצוע"), h("div", { class: "sub", style: "margin-bottom:10px" }, "חי מ-CLOB · מתעדכן כל 30 שניות"), bookBox))));
   loadChart("1w");
   loadBook();
 };
 const stat = (l, v) => h("div", null, h("div", { class: "l" }, l), h("div", { class: "v" }, ltr(v)));
+// Four different "prices" that are easy to confuse: show each with what it is, its source and time.
+function priceTypesCard(p, accepting) {
+  if (!p) return null;
+  const when = (t) => t ? ago(t) : "לא ידוע";
+  const row = (name, value, what, src, t) => h("tr", null, h("td", null, h("strong", null, name), h("div", { class: "faint" }, what)),
+    h("td", null, value), h("td", null, h("div", null, src), h("div", { class: "faint" }, "זמן מקור: " + when(t))));
+  const ex = p.executable;
+  return card("ארבעה סוגי מחיר", accepting === true ? "השוק מקבל פקודות (אומת ב-Gamma)" : accepting === false ? "השוק לא מקבל פקודות" : "לא ידוע אם השוק מקבל פקודות — לא נחשב סחיר",
+    h("div", { class: "scroll-x" }, h("table", { class: "t" },
+      h("thead", null, h("tr", null, ["סוג", "ערך", "מקור"].map((x) => h("th", null, x)))),
+      h("tbody", null,
+        row("מחיר תצוגה", ltr(pct(p.display.value)), "מה שמוצג באתר Polymarket. לא בהכרח אפשר לקנות בו", "Gamma", p.display.source_time),
+        row("Bid / Ask מדווח", ltr(`${cents(p.quoted.bid)} / ${cents(p.quoted.ask)}`), "הצעה הכי טובה לפי Gamma, בלי כמות", "Gamma", p.quoted.source_time),
+        p.book ? row("ספר פקודות", p.book.valid ? h("span", { class: "badge ok" }, "תקין") : h("span", { class: "badge bad" }, "לא תקין"),
+          "שני הצדדים קיימים ו-Bid קטן מ-Ask", "CLOB", p.book.source_time || p.book.ingested_at)
+          : row("ספר פקודות", "—", "לא נאסף לשוק הזה", "CLOB", null),
+        ex ? row("מחיר בר-ביצוע", h("div", null, ltr(`$100: ${cents(ex.buy_100)}`), h("div", null, ltr(`$1,000: ${ex.buy_1000 == null ? "אין עומק" : cents(ex.buy_1000)}`))),
+          "מחיר ממוצע לקנייה בפועל לפי עומק הספר", "CLOB", ex.source_time || ex.ingested_at)
+          : row("מחיר בר-ביצוע", "—", "אין ספר תקין, אי אפשר לחשב", "CLOB", null)))));
+}
 
 function bookView(b) {
   if (b.empty) return empty("ספר הפקודות ריק");
@@ -491,8 +513,31 @@ PAGES.research = async (view) => {
           h("td", null, `${x.side} `, ltr(`${pct(x.lo, 0)}–${pct(x.hi, 0)}`)), h("td", null, ltr(`${x.trades}/${x.events}`)),
           h("td", null, ltr(pct(x.mean_return), x.mean_return >= 0 ? "up" : "down")),
           h("td", null, x.ci_lo == null ? "—" : ltr(`${pct(x.ci_lo)} … ${pct(x.ci_hi)}`)),
-          h("td", null, h("span", { class: "badge " + (x.edge_supported ? "ok" : "") }, x.edge_supported ? "נתמך" : "לא הוכח"))))))))))));
+          h("td", null, h("span", { class: "badge" }, x.insample_ci_positive ? "חיובי בתוך המדגם בלבד" : "לא הוכח")))))))),
+      wfCard(res.walk_forward)))));
 };
+const WF_VERDICT = { supported: ["ok", "נתמך — עבר את כל השערים"], oos_positive_needs_execution_check: ["wait", "חיובי מחוץ למדגם — עדיין לא אומת ביצוע בספר פקודות"],
+  not_supported: ["", "לא נתמך"], insufficient_data: ["", "אין מספיק נתונים"] };
+function wfCard(w) {
+  if (!w) return null;
+  const [cls, label] = WF_VERDICT[w.verdict] || ["", w.verdict];
+  const f = w.forecast, o = w.oos_trading, g = w.gates || {};
+  const gate = (ok, text) => h("li", null, ok ? "✓ " : "✗ ", text);
+  return card("בדיקה מחוץ למדגם (Walk-Forward)", "מאמנים על העבר, בודקים על התקופה שאחריו. בלי מידע עתידי, אירועים קשורים מוצאים מהאימון",
+    h("div", { class: "detail-actions", style: "margin-bottom:8px" }, h("span", { class: "badge " + cls }, label)),
+    w.verdict === "insufficient_data" ? h("p", { class: "sub" }, w.reason) : h("div", { class: "stack" },
+      f ? h("div", { class: "stats" },
+        stat("Brier — מחיר השוק", f.market_brier.toFixed(4)), stat("Brier — כיול מחדש", f.model_brier.toFixed(4)),
+        stat("Log loss — שוק / מודל", `${f.market_log_loss.toFixed(3)} / ${f.model_log_loss.toFixed(3)}`)) : null,
+      f ? h("p", { class: "sub" }, f.model_beats_market ? "הכיול מחדש ניבא טוב יותר מהשוק מחוץ למדגם." : "שום מודל לא ניבא טוב יותר ממחיר השוק מחוץ למדגם.") : null,
+      o ? h("p", { class: "sub" }, `כלל מסחר שנבחר באימון ונבדק אחריו: ${o.events} אירועים, תשואה ממוצעת `, ltr(pct(o.mean_return)),
+        o.ci ? h("span", null, " (טווח 95%: ", ltr(`${pct(o.ci[0])} … ${pct(o.ci[1])}`), ")") : null) : null,
+      h("ul", { class: "clean" },
+        gate(g.oos_ci_above_zero_30_events, "רווח מחוץ למדגם, לפחות 30 אירועים, כל הטווח מעל 0"),
+        gate(g.survives_holm, "שורד תיקון לבדיקה של הרבה כללים (Holm)"),
+        gate(g.positive_at_2x_slippage, "נשאר חיובי גם עם החלקה כפולה"),
+        gate(g.execution_validated, "אומת שאפשר לבצע בספר פקודות חי"))));
+}
 function reliability(buckets) {
   const W = 300, P = 30;
   const X = (v) => P + v * (W - 2 * P), Y = (v) => W - P - v * (W - 2 * P);
@@ -505,6 +550,43 @@ function reliability(buckets) {
     buckets.map((b) => [s("line", { x1: X(b.mean_price), x2: X(b.mean_price), y1: Y(b.ci_lo), y2: Y(b.ci_hi), stroke: "#5B9BFF", "stroke-width": 1.5 }),
       s("circle", { cx: X(b.mean_price), cy: Y(b.freq), r: 3 + 6 * Math.sqrt(b.n / maxN), fill: "#5B9BFF", "fill-opacity": 0.85 })]));
 }
+
+// ---- Evidence board (watchlist) ----
+const KIND = { sec: "דיווח רשמי ל-SEC", telegram: "טלגרם", manual: "רישום ידני" };
+PAGES.evidence = async (view) => {
+  const d = await api("/api/evidence");
+  if (current !== "evidence") return;
+  const pctOrDash = (v) => v == null ? h("span", { class: "faint" }, "—") : ltr(pct(v, 1), v >= 0 ? "up" : "down");
+  const finding = (f) => h("div", { class: "card", style: "padding:12px" },
+    h("div", { class: "detail-actions" },
+      h("span", { class: "badge " + (f.official ? "ok" : "") }, KIND[f.kind] || f.kind),
+      h("strong", null, f.source),
+      f.risk_verdict ? h("span", { class: "badge " + ({ red: "bad", yellow: "wait", green: "ok" }[f.risk_verdict] || "") }, "סיכון: " + ({ red: "אדום", yellow: "צהוב", green: "ירוק" }[f.risk_verdict] || f.risk_verdict)) : null),
+    h("div", { class: "stats", style: "margin-top:10px" },
+      stat("פורסם", new Date(f.published_at).toLocaleString("he-IL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })),
+      stat("מחיר לפני הפרסום", f.prior_close == null ? "—" : "$" + f.prior_close.toFixed(2)),
+      stat("מחיר עכשיו", f.current == null ? "—" : "$" + f.current.toFixed(2)),
+      h("div", null, h("div", { class: "l" }, "שינוי מאז"), h("div", { class: "v" }, pctOrDash(f.change_since))),
+      h("div", null, h("div", { class: "l" }, "אחרי 5 ימים"), h("div", { class: "v" }, pctOrDash(f.r5))),
+      h("div", null, h("div", { class: "l" }, "מול SPY (5 ימים)"), h("div", { class: "v" }, pctOrDash(f.excess_r5)))),
+    h("div", { class: "detail-actions", style: "margin-top:8px" },
+      safeUrl(f.source_url) ? h("a", { class: "btn", href: safeUrl(f.source_url), target: "_blank", rel: "noopener noreferrer" }, "למקור", icon("ext", 16)) : h("span", { class: "faint" }, "אין קישור למקור"),
+      h("a", { class: "btn", href: "#/check/" + encodeURIComponent(f.symbol || "") }, "בדיקת סיכון")),
+    h("div", { class: "sub", style: "margin-top:8px" }, "איכות הנתונים: " + (f.data_quality.join(" · ") || "תקינה")),
+    h("div", { class: "faint", style: "margin-top:4px" }, "מה עוד לא ידוע: " + f.unknown.join(" · ")));
+  const pm = (m) => h("div", { class: "card", style: "padding:12px" },
+    h("div", { class: "detail-actions" }, h("span", { class: "badge info" }, "Polymarket · התאמה לפי שם החברה"),
+      h("a", { href: "#/m/" + encodeURIComponent(m.id), dir: "auto" }, m.question)),
+    h("div", { class: "sub", style: "margin-top:6px" }, "מחיר: ", ltr(pct(m.price)), " · שינוי יומי: ", ptsEl(m.one_day_change)),
+    m.resolution_risk.length ? h("ul", { class: "clean" }, m.resolution_risk.map((r) => h("li", null, r))) : h("div", { class: "faint" }, "לא זוהו סיכוני הכרעה בולטים"),
+    h("div", { class: "faint" }, m.unknown.join(" · ")));
+  view.replaceChildren(h("div", { class: "stack" },
+    h("p", { class: "sub" }, d.note),
+    ...d.watchlist.map((w) => card(w.symbol,
+      w.price == null ? "אין נתוני מחיר" : h("span", null, ltr("$" + w.price.toFixed(2)), " · ", pctOrDash(w.day_change), " ביום האחרון · ", w.price_day),
+      w.findings.length ? h("div", { class: "stack" }, w.findings.map((f) => finding({ ...f, symbol: w.symbol }))) : empty("אין ממצאים ב-60 הימים האחרונים"),
+      w.polymarket.length ? h("div", { class: "stack", style: "margin-top:10px" }, w.polymarket.map(pm)) : null))));
+};
 
 // ---- Suspicious-stock checker ----
 const VERDICT = { red: ["bad", "אדום — דגלים של ניפוח מחיר (pump). לא להיכנס."], yellow: ["wait", "צהוב — יש סימני סיכון, לבדוק לעומק."],
@@ -585,7 +667,10 @@ PAGES.tips = async (view) => {
     h("button", { type: "submit", class: "btn primary" }, "רשום טיפ"));
   const table = (head, rows, none) => rows.length ? h("div", { class: "scroll-x" }, h("table", { class: "t" },
     h("thead", null, h("tr", null, head.map((x) => h("th", null, x)))), h("tbody", null, rows))) : empty(none);
-  const board = d.leaderboard.map((r) => h("tr", null, h("td", null, r.source), h("td", null, ltr(String(r.tips))),
+  const GATE = { reliable: ["ok", "אמין"], promising: ["wait", "מבטיח — עוד לא מוכח"], not_reliable: ["bad", "לא אמין"], collecting: ["", "צובר נתונים"] };
+  const gateCell = (g) => { if (!g) return "—"; const [c, l] = GATE[g.status] || ["", g.status];
+    return h("div", null, h("span", { class: "badge " + c }, l), g.n ? h("div", { class: "faint" }, ltr(`${pct(g.success_rate, 0)} (≥${pct(g.success_lo95, 0)}) · n=${g.n}`)) : null); };
+  const board = d.leaderboard.map((r) => h("tr", null, h("td", null, r.source), h("td", null, gateCell(r.gate)), h("td", null, ltr(String(r.tips))),
     h("td", null, ltr(String(r.measured_5d))), h("td", null, pctCell(r.median_r5)), h("td", null, r.win_rate_5d == null ? "—" : ltr(pct(r.win_rate_5d, 0))),
     h("td", null, pctCell(r.excess_r5)), h("td", null, r.beat_spy_5d == null ? "—" : ltr(pct(r.beat_spy_5d, 0))),
     h("td", null, pctCell(r.avg_r20)), h("td", null, pctCell(r.worst_drawdown_20)), h("td", null, r.red_share == null ? "—" : ltr(pct(r.red_share, 0)))));
@@ -596,7 +681,7 @@ PAGES.tips = async (view) => {
     h("td", null, pctCell(t.r1)), h("td", null, pctCell(t.r5)), h("td", null, pctCell(t.r20)), h("td", null, pctCell(t.max_drawdown_20))); });
   view.replaceChildren(h("div", { class: "stack" },
     card("רישום טיפ ידני", "קיבלת המלצה בוואטסאפ? תרשום אותה כאן — המערכת תמדוד מה קרה אחרי", form, msg),
-    card("דירוג מקורות", d.rule, table(["מקור", "טיפים", "נמדדו (5 ימים)", "חציון 5 ימים", "הרוויחו", "מול SPY (5 ימים)", "ניצחו את SPY", "ממוצע 20 יום", "הירידה הגרועה", "אדומים"], board,
+    card("דירוג מקורות", d.rule + ". \"אמין\" = לפחות 50 טיפים, 60% ניצחו את SPY, והתוצאה לא מקרית (גבול תחתון מעל 50%)", table(["מקור", "אמינות (ניצח SPY אחרי עלויות)", "טיפים", "נמדדו (5 ימים)", "חציון 5 ימים", "הרוויחו", "מול SPY (5 ימים)", "ניצחו את SPY", "ממוצע 20 יום", "הירידה הגרועה", "אדומים"], board,
       "עוד אין טיפים. רשום ידנית, או חבר את טלגרם (הוראות ב-README).")),
     card("טיפים אחרונים", "לחיצה על סימול פותחת את בודק המניות", table(["זמן", "מקור", "סימול", "סיכון", "כניסה", "יום", "5 ימים", "20 יום", "ירידה מקס׳"], recent, "—")),
     h("p", { class: "faint" }, "נמדד בלי עמלות ובלי החלקה — בפועל התוצאה הייתה גרועה יותר, במיוחד במניות OTC. אין כאן המלצה לקנות דבר.")));

@@ -219,3 +219,35 @@ CREATE TABLE IF NOT EXISTS sec_events (
     evaluated_at timestamptz
 );
 CREATE TABLE IF NOT EXISTS sec_events_done (day date PRIMARY KEY, done_at timestamptz NOT NULL DEFAULT now());
+
+-- host resources sampled every collector cycle (pmintel/hostmetrics.py)
+CREATE TABLE IF NOT EXISTS host_metrics (
+    ts            timestamptz NOT NULL DEFAULT now(),
+    cpu_pct       double precision,
+    load1         double precision, load5 double precision, load15 double precision,
+    cpus          integer,
+    mem_total     bigint, mem_available bigint,
+    disk_total    bigint, disk_used bigint,
+    db_bytes      bigint
+);
+CREATE INDEX IF NOT EXISTS host_metrics_ts_idx ON host_metrics (ts DESC);
+
+-- Provenance (2026-10-18): source time vs ingest time, resolution-terms versions, data source
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS source_updated_at timestamptz;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS rules_hash text;
+CREATE TABLE IF NOT EXISTS market_rules (
+    market_id         text NOT NULL,
+    rules_hash        text NOT NULL,
+    description       text,
+    resolution_source text,
+    end_date          timestamptz,
+    outcomes          jsonb,
+    first_seen_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (market_id, rules_hash)
+);
+ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS source_ts timestamptz;
+ALTER TABLE orderbooks ADD COLUMN IF NOT EXISTS book_ts timestamptz;
+ALTER TABLE price_history ADD COLUMN IF NOT EXISTS source text;
+ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS detail jsonb;
+ALTER TABLE tips ADD COLUMN IF NOT EXISTS source_url text;
+ALTER TABLE sec_events ADD COLUMN IF NOT EXISTS url text;

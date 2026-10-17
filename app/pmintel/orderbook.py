@@ -35,6 +35,15 @@ def depth_within(levels: list[tuple[float, float]], best: float, cents: float) -
     return sum(p * s for p, s in levels if abs(p - best) <= cents + 1e-9)
 
 
+def _book_ts(v):
+    from datetime import datetime, timezone
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(x / 1000 if x > 1e11 else x, tz=timezone.utc)
+
+
 def summarize(book: dict) -> dict | None:
     bids = sorted(_levels(book.get("bids")), key=lambda x: -x[0])  # best (highest) first
     asks = sorted(_levels(book.get("asks")), key=lambda x: x[0])   # best (lowest) first
@@ -58,4 +67,6 @@ def summarize(book: dict) -> dict | None:
         "sell_vwap_1000": vwap_for_notional(bids, 1000),
         # raw depth kept for later research (up to 50 levels per side)
         "levels": {"bids": bids[:50], "asks": asks[:50]},
+        # the CLOB's own timestamp for this book (source time), if it sent one
+        "book_ts": _book_ts(book.get("timestamp")),
     }

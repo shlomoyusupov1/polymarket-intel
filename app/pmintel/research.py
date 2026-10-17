@@ -90,8 +90,8 @@ def strategy(rows: list[dict], side: str, lo: float, hi: float,
         "win_rate": wins / trades, "mean_return": mean, "stderr": se,
         "t_stat": mean / se if se else None,
         "ci_lo": mean - 1.96 * se if se else None, "ci_hi": mean + 1.96 * se if se else None,
-        # "significant" only if the whole 95% CI is above zero AND sample is not tiny
-        "edge_supported": bool(se and m >= 30 and mean - 1.96 * se > 0),
+        # in-sample only: never an edge claim by itself (see walkforward.py for the out-of-sample gate)
+        "insample_ci_positive": bool(se and m >= 30 and mean - 1.96 * se > 0),
     }
 
 
@@ -112,17 +112,18 @@ def load_rows(conn, horizon_h: int) -> list[dict]:
       WHERE closed AND resolved_outcome IS NOT NULL AND ref_index IS NOT NULL AND closed_time IS NOT NULL
     )
     SELECT m.id, m.event_id, m.category, (m.resolved_outcome = m.ref_outcome)::int AS y,
-           m.cutoff, ph.ts, ph.price
+           m.cutoff, ph.ts, ph.price, m.cutoff + make_interval(hours => %s) AS ref_time
     FROM m
     JOIN LATERAL (SELECT ts, price FROM price_history
                   WHERE token_id = m.token_id AND ts <= m.cutoff
                   ORDER BY ts DESC LIMIT 1) ph ON TRUE
     """
     out = []
-    for mid, event_id, cat, y, cutoff, ts, price in conn.execute(q, (horizon_h,)).fetchall():
+    for mid, event_id, cat, y, cutoff, ts, price, ref_time in conn.execute(q, (horizon_h, horizon_h)).fetchall():
         if cutoff - ts > MAX_STALENESS or price is None or not (0 <= price <= 1):
             continue
-        out.append({"market_id": mid, "event_id": event_id, "category": cat, "y": y, "p": float(price)})
+        out.append({"market_id": mid, "event_id": event_id, "category": cat, "y": y, "p": float(price),
+                    "ref_time": ref_time})
     return out
 
 
@@ -138,17 +139,35 @@ def analyze(rows: list[dict], slippage: float, fee: float) -> dict:
     }
 
 
+def data_status(conn) -> dict:
+    """Is the historical sample complete? A partial/interrupted backfill is reported, not hidden."""
+    last = conn.execute("""SELECT status, finished_at FROM job_runs WHERE job = 'backfill'
+                           ORDER BY id DESC LIMIT 1""").fetchone()
+    cov = conn.execute("""SELECT count(*) FILTER (WHERE resolved_outcome IS NOT NULL),
+                                 count(*) FILTER (WHERE resolved_outcome IS NOT NULL AND EXISTS (
+                                   SELECT 1 FROM price_history p WHERE p.token_id = markets.token_ids->>markets.ref_index))
+                          FROM markets""").fetchone()
+    return {"backfill_status": last[0] if last else "never_ran",
+            "backfill_finished": str(last[1]) if last and last[1] else None,
+            "resolved_markets": cov[0], "with_history": cov[1],
+            "complete": bool(last and last[0] == "ok")}
+
+
 def run(conn) -> dict:
     from . import db
+    from .walkforward import walk_forward
     params = {"horizons_h": HORIZONS_H, "slippage": config.RESEARCH_SLIPPAGE, "fee": config.RESEARCH_FEE,
               "max_staleness_h": MAX_STALENESS.total_seconds() / 3600}
     with db.job_run(conn, "research") as run_state:
         result = {}
+        status = data_status(conn)
         for h in HORIZONS_H:
             rows = load_rows(conn, h)
             result[str(h)] = analyze(rows, config.RESEARCH_SLIPPAGE, config.RESEARCH_FEE)
+            result[str(h)]["walk_forward"] = walk_forward(rows, h, config.RESEARCH_SLIPPAGE, config.RESEARCH_FEE)
+        params["data_status"] = status
         conn.execute("INSERT INTO research_reports (kind, params, result) VALUES (%s, %s, %s)",
-                     ("historical_v1", json.dumps(params), json.dumps(result)))
+                     ("historical_v1", json.dumps(params, default=str), json.dumps(result, default=str)))
         run_state["items"] = sum(r["calibration"]["n"] for r in result.values())
     log.info("research report saved")
     return result

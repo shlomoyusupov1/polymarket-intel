@@ -32,6 +32,7 @@ def open_market(i, liq, price):
             "outcomePrices": json.dumps([str(price), str(1 - price)]), "clobTokenIds": f'["t{i}y","t{i}n"]',
             "liquidityNum": liq, "volumeNum": liq * 10, "volume24hr": liq, "active": True, "closed": False,
             "bestBid": price - 0.01, "bestAsk": price + 0.01, "spread": 0.02,
+            "acceptingOrders": True, "enableOrderBook": True, "updatedAt": "2026-10-17T10:00:00Z",
             "endDate": "2026-12-31T00:00:00Z", "events": [{"id": 1000 + i, "slug": f"ev-{i}"}]}
 
 
@@ -127,6 +128,16 @@ def test_full_pipeline(conn, monkeypatch):
         ms = tc.get("/api/markets", params={"min_liquidity": 1000, "sort": "liquidity"}).json()
         assert [m["id"] for m in ms] == ["1", "2", "3"] and all(m["decision"] == "WAIT" for m in ms)
         assert tc.get("/api/markets", params={"search": "market 2"}).json()[0]["id"] == "2"
+        # acceptingOrders unknown (NULL) is never shown as tradable
+        conn.execute("UPDATE markets SET accepting_orders = NULL WHERE id = '3'")
+        assert "3" not in [m["id"] for m in tc.get("/api/markets", params={"min_liquidity": 1000}).json()]
+        assert "3" in [m["id"] for m in tc.get("/api/markets", params={"min_liquidity": 1000, "tradable": False}).json()]
+        conn.execute("UPDATE markets SET accepting_orders = TRUE WHERE id = '3'")
+        # provenance: source time and resolution-terms version are stored
+        src, rh = conn.execute("SELECT source_updated_at, rules_hash FROM markets WHERE id = '1'").fetchone()
+        assert src.astimezone(timezone.utc).isoformat().startswith("2026-10-17T10:00") and len(rh) == 16
+        assert conn.execute("SELECT count(*) FROM market_rules WHERE market_id = '1'").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM snapshots WHERE source_ts IS NOT NULL").fetchone()[0] > 0
         # open_only hides markets that are practically decided; all seeded ones are 30-80% and end 2026-12-31
         assert len(tc.get("/api/markets", params={"open_only": True, "min_liquidity": 1000}).json()) == 3
         d = tc.get("/api/markets/1").json()
@@ -134,6 +145,10 @@ def test_full_pipeline(conn, monkeypatch):
         assert d["orderbook"]["best_ask"] == 0.31 and abs(d["orderbook"]["buy_vwap_100"] - 0.31) < 1e-9
         assert h["counts"]["orderbook_rows"] == 1
         assert d["orderbook"]["valid"] is True
+        pt = d["prices"]  # four distinct price types, each with its source
+        assert pt["display"]["source"] == "gamma" and pt["book"]["source"] == "clob"
+        assert abs(pt["executable"]["buy_100"] - 0.31) < 1e-9 and pt["executable"]["buy_1000"] is None
+        assert len(d["rules_versions"]) == 1
         assert d["data_quality"] == {"level": "limited", "issues": ["אין עומק ל-$1,000"]}
         d3 = tc.get("/api/markets/3").json()  # no order book collected -> never 'good'
         assert d3["data_quality"]["level"] == "bad" and "אין ספר פקודות" in d3["data_quality"]["issues"]

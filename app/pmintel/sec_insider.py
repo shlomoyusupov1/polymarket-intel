@@ -115,7 +115,7 @@ def parse_filing(text: str) -> dict | None:
             "title": _t(rel, "officerTitle") if rel is not None else "", "director": is_dir, "officer": is_off}
 
 
-def record_buy(conn, buy: dict, accession: str) -> list[str]:
+def record_buy(conn, buy: dict, accession: str, url: str | None = None) -> list[str]:
     """Store the purchase; add the single-insider tip and, if a different insider bought the same
     stock within the previous 10 days, the cluster tip. (tips dedups each source per symbol/24 h.)"""
     cur = conn.execute("""INSERT INTO sec_buys (accession, symbol, owner_cik, accepted, value, shares, title)
@@ -125,12 +125,13 @@ def record_buy(conn, buy: dict, accession: str) -> list[str]:
     if not cur.rowcount:
         return []
     out = []
-    if tips.record(conn, SOURCE_ONE, buy["symbol"], buy["accepted"], buy["price"], kind="sec"):
+    if tips.record(conn, SOURCE_ONE, buy["symbol"], buy["accepted"], buy["price"], kind="sec", source_url=url):
         out.append(SOURCE_ONE)
     others = conn.execute("""SELECT count(DISTINCT owner_cik) FROM sec_buys WHERE symbol = %s AND owner_cik <> %s
                              AND accepted BETWEEN %s - interval '10 days' AND %s""",
                           (buy["symbol"], buy["owner_cik"], buy["accepted"], buy["accepted"])).fetchone()[0]
-    if others >= 1 and tips.record(conn, SOURCE_CLUSTER, buy["symbol"], buy["accepted"], buy["price"], kind="sec"):
+    if others >= 1 and tips.record(conn, SOURCE_CLUSTER, buy["symbol"], buy["accepted"], buy["price"], kind="sec",
+                                   source_url=url):
         out.append(SOURCE_CLUSTER)
     return out
 
@@ -153,7 +154,7 @@ def process_day(conn, sec: Sec, day: date) -> dict:
         buy = parse_filing(text or "")
         if buy:
             stats["buys"] += 1
-            stats["tips"] += len(record_buy(conn, buy, accession))
+            stats["tips"] += len(record_buy(conn, buy, accession, BASE + path))
     conn.execute("INSERT INTO sec_index_done (day, filings, buys) VALUES (%s,%s,%s) ON CONFLICT (day) DO UPDATE "
                  "SET filings = EXCLUDED.filings, buys = EXCLUDED.buys, done_at = now()",
                  (day, stats["filings"], stats["buys"]))
