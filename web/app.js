@@ -193,7 +193,7 @@ const PAGES = {};
 
 // ---- Command Center ----
 PAGES.home = async (view) => {
-  const o = await api("/api/overview");
+  const [o, macro] = await Promise.all([api("/api/overview"), api("/api/macro").catch(() => [])]);
   if (current !== "home") return;
   const st = o.stats, op = o.opportunities, fr = o.freshness;
   const supported = op.statistically_supported || [];
@@ -213,7 +213,9 @@ PAGES.home = async (view) => {
         card("מה השתנה ב-24 השעות האחרונות", "השינוי היומי כפי ש-Polymarket מדווח · שווקים עם נזילות ≥ $5K",
           o.changed.length ? h("div", { class: "mlist" }, o.changed.map((m) => marketRow(m))) : empty("אין עדיין נתוני שינוי — יופיעו אחרי סריקה מלאה")),
         card("מה מושך תשומת לב", "הכי הרבה מחזור ב-24 שעות",
-          o.attention.length ? h("div", { class: "mlist" }, o.attention.map((m) => marketRow(m))) : empty("אין נתונים"))),
+          o.attention.length ? h("div", { class: "mlist" }, o.attention.map((m) => marketRow(m))) : empty("אין נתונים")),
+        card("מה Polymarket אומר על הכלכלה", "ריבית, מיתון, אינפלציה — הסיכויים לפי השוק (לא תחזית שלנו). שינוי חד כאן משפיע גם על מניות ואג״ח",
+          macro.length ? h("div", { class: "mlist" }, macro.map((m) => marketRow(m))) : empty("אין כרגע שווקי מאקרו נזילים"))),
       h("div", { class: "stack" },
         h("section", { class: "card" },
           h("div", { class: "sub" }, "האם יש הזדמנות נתמכת סטטיסטית?"),

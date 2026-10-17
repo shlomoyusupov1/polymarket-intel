@@ -187,3 +187,21 @@ CREATE INDEX IF NOT EXISTS tips_source_idx ON tips (source, ts DESC);
 ALTER TABLE tips ADD COLUMN IF NOT EXISTS spy_r1 double precision;
 ALTER TABLE tips ADD COLUMN IF NOT EXISTS spy_r5 double precision;
 ALTER TABLE tips ADD COLUMN IF NOT EXISTS spy_r20 double precision;
+
+-- SEC Form 4 open-market purchases by officers/directors (public filings) — feeds the tip tracker
+CREATE TABLE IF NOT EXISTS sec_buys (
+    accession  text PRIMARY KEY,
+    symbol     text NOT NULL,
+    owner_cik  text,
+    accepted   timestamptz NOT NULL,
+    value      double precision,
+    shares     double precision,
+    title      text
+);
+CREATE INDEX IF NOT EXISTS sec_buys_symbol_idx ON sec_buys (symbol, accepted DESC);
+CREATE TABLE IF NOT EXISTS sec_index_done (
+    day      date PRIMARY KEY,
+    filings  integer,
+    buys     integer,
+    done_at  timestamptz NOT NULL DEFAULT now()
+);

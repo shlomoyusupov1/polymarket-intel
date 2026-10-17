@@ -55,11 +55,16 @@ def client():
 
 
 async def outcome_loop(conn):
+    """Every 6 h: new SEC insider purchases (last 5 days), then outcomes for all recent tips."""
+    from . import sec_insider
     while True:
-        try:
-            log.info("outcomes updated: %d", tips.update_outcomes(conn))
-        except Exception:
-            log.exception("outcome update failed")
+        for name, fn in (("sec", lambda: sec_insider.run(conn, sec_insider.Sec(), 5)),
+                         ("outcomes", lambda: tips.update_outcomes(conn))):
+            try:
+                res = await asyncio.to_thread(fn)
+                log.info("%s: %s", name, res if not isinstance(res, list) else f"{len(res)} days")
+            except Exception:
+                log.exception("%s failed", name)
         await asyncio.sleep(6 * 3600)
 
 

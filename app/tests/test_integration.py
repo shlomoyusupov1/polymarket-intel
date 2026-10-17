@@ -146,6 +146,7 @@ def test_full_pipeline(conn, monkeypatch):
         assert mv[0]["id"] == "1" and abs(mv[0]["change"] - 0.15) < 1e-9
         assert ov["opportunities"]["statistically_supported"] == []
         assert {"changed", "attention", "freshness"} <= set(ov)
+        assert tc.get("/api/macro").json() == []  # no economic markets in the seed
         # live endpoints fail honestly (502) when the upstream is unreachable in tests
         monkeypatch.setattr(api, "_clob", Clob(api_of(lambda r: httpx.Response(503))))
         api._cache.clear()

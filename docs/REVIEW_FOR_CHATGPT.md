@@ -126,6 +126,23 @@ Fixed outcome rule for every source: entry at the first US open after the tip, r
 of sessions 1/5/20, worst drawdown / best run-up within 20 sessions, no costs (stated as optimistic).
 Each tip also stores the stockcheck verdict at tip time. Leaderboard per source.
 
+## 3g. First tip-tracker results and new evidence sources (2026-10-18)
+
+First real import: 451 tips from 7 Telegram groups over 30 days, 406 with outcomes. At 5 sessions
+every group with enough tips was negative (median −1.0% / −1.7% / −2.0%, ~38% positive; one group
+median −10.1% on 8 tips). A same-window SPY benchmark (excess return, beat-SPY rate) was added to
+separate market drift from tip quality. One month only; news channels are not recommendations.
+
+New sources, all free and measured with the same outcome rule:
+- `pmintel/sec_insider.py`: SEC EDGAR Form 4 open-market purchases (code P, acquired, ≥ $25k) by
+  officers/directors → source "SEC: קניית מנהל"; a second distinct insider within 10 days → "SEC: קנייה
+  קבוצתית". Tip time = SEC acceptance time. Daily index + one request per filing, paced < 10 req/s,
+  User-Agent from SEC_USER_AGENT. Runs every 6 h inside the `tips` service; `--days N` backfill.
+- `/api/macro` + Command Center card: Polymarket's own odds on Fed/rates/recession/inflation markets,
+  shown as context only.
+- Not built yet: post-earnings drift (needs an earnings-surprise feed; Twelve Data's server API key
+  and plan coverage to be confirmed with the owner).
+
 ## 4. What I'd like challenged
 1. Keyset `after_cursor` name was inferred from a third-party Go client; production scan passed, but
    please confirm against official docs.

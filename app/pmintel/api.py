@@ -366,3 +366,17 @@ def tips_add(tip: TipIn):
     if tid is None:
         raise HTTPException(409, "already logged in the last 24 h")
     return {"id": tid}
+
+
+MACRO_PATTERNS = ["%fed %", "%federal reserve%", "%interest rate%", "%rate cut%", "%rate hike%", "%bps%",
+                  "%recession%", "%inflation%", "%cpi%", "%unemployment%", "%gdp%", "%s&p 500%", "%nasdaq%"]
+
+
+@app.get("/api/macro")
+def macro(limit: int = Query(12, le=50)):
+    """Polymarket's own odds on economic events (Fed, recession, inflation...). The market's view,
+    not our forecast — shown as context for the stock side."""
+    return q(f"""SELECT {LIST_COLS} FROM markets
+                 WHERE {TRADABLE} AND liquidity >= 5000 AND ref_price BETWEEN 0.02 AND 0.98
+                   AND question ILIKE ANY(%s)
+                 ORDER BY volume_24h DESC NULLS LAST LIMIT %s""", (MACRO_PATTERNS, limit))
