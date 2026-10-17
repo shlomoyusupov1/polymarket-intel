@@ -62,9 +62,10 @@ def fetch_history(clob: Clob, token_id: str, fidelity: int, start, closed):
 
 
 def backfill(conn, gamma: Gamma, clob: Clob, since: str, min_volume: float, fidelity: int,
-             limit: int | None = None, with_history: bool = True, discover: bool = True) -> dict:
+             limit: int | None = None, with_history: bool = True, discover: bool = True,
+             data_api=None) -> dict:
     stats = {"seen": 0, "resolved": 0, "history_fetched": 0, "history_points": 0, "history_empty": 0,
-             "history_error": 0}
+             "history_error": 0, "history_from_data_api": 0}
     with db.job_run(conn, "backfill") as run:
         batch: dict[str, dict] = {}
         seen_ids: set[str] = set()
@@ -86,6 +87,7 @@ def backfill(conn, gamma: Gamma, clob: Clob, since: str, min_volume: float, fide
                 break
         db.upsert_markets(conn, list(batch.values()))
 
+        rows = []
         if with_history:
             rows = conn.execute(
                 """SELECT m.id, m.token_ids->>m.ref_index, m.start_date, m.closed_time
@@ -100,17 +102,35 @@ def backfill(conn, gamma: Gamma, clob: Clob, since: str, min_volume: float, fide
                 if limit and i >= limit:
                     break
                 pts = fetch_history(clob, token_id, fidelity, start, closed)
-                if pts is None:  # every variant rejected by the CLOB: record and move on
+                source = "clob"
+                if not pts and data_api is not None:  # independent second source (Data API v2)
+                    try:
+                        alt = data_api.price_history(token_id, start, closed) if start and closed else \
+                            data_api.price_history(token_id)
+                    except httpx.HTTPError:
+                        alt = None
+                    if alt:
+                        pts, source = alt, "data_api_v2"
+                        stats["history_from_data_api"] += 1
+                if pts is None:  # rejected everywhere: record and move on
                     stats["history_error"] += 1
                     continue
                 stats["history_fetched"] += 1
                 if not pts:
                     stats["history_empty"] += 1
-                stats["history_points"] += db.insert_price_history(conn, market_id, token_id, pts)
+                stats["history_points"] += db.insert_price_history(conn, market_id, token_id, pts, source)
                 if (i + 1) % 100 == 0:
                     log.info("history %d/%d", i + 1, len(rows))
         run["items"] = stats["seen"]
-    log.info("backfill done: %s", stats)
+        # 'ok' only when every candidate token got a history answer and nothing was cut short
+        candidates = len(rows) if with_history else 0
+        stats["history_candidates"] = candidates
+        complete = with_history and not limit and stats["history_error"] == 0 and \
+            stats["history_fetched"] >= candidates
+        run["status"] = "ok" if complete else "partial"
+        run["detail"] = {**stats, "since": since, "min_volume": min_volume, "limit": limit,
+                         "with_history": with_history, "discover": discover}
+    log.info("backfill %s: %s", run["status"], stats)
     return stats
 
 
@@ -126,8 +146,9 @@ def main() -> None:
     a = p.parse_args()
     conn = db.connect()
     db.init_schema(conn)
+    from .dataapi import DataApi
     backfill(conn, Gamma(), Clob(), a.since, a.min_volume, a.fidelity, a.limit, not a.no_history,
-             discover=not a.history_only)
+             discover=not a.history_only, data_api=DataApi())
 
 
 if __name__ == "__main__":

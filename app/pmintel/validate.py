@@ -34,7 +34,9 @@ def _check(report: list, name: str, fn):
     return entry
 
 
-def run(gamma: Gamma, clob: Clob) -> dict:
+def run(gamma: Gamma, clob: Clob, data_api=None) -> dict:
+    from .dataapi import DataApi
+    data_api = data_api or DataApi()
     report: list[dict] = []
     state: dict = {}
 
@@ -71,6 +73,7 @@ def run(gamma: Gamma, clob: Clob) -> dict:
         page = gamma.api.get("/markets", {"closed": "true", "end_date_min": since, "limit": 100,
                                           "order": "volumeNum", "ascending": "false"})
         recs = [r for r in (normalize_market(m) for m in page) if r["resolved_outcome"] and r["token_ids"]]
+        state["resolved_recs"] = recs
         tested, with_hist, samples = 0, 0, []
         for r in recs[:10]:
             pts = clob.price_history(r["token_ids"][r["ref_index"]], 360)
@@ -94,11 +97,46 @@ def run(gamma: Gamma, clob: Clob) -> dict:
         valid = sum(1 for o in out if o.get("valid"))
         return valid > 0, {"books": out, "valid": valid}
 
+    def data_api_status():
+        st = data_api.status()
+        d = st.get("data", st) if isinstance(st, dict) else {}
+        age = d.get("age_seconds")
+        return isinstance(age, (int, float)) and age < 3600, {"age_seconds": age, "computed_at": d.get("computed_at"),
+                                                             "keys": sorted(d) if isinstance(d, dict) else None}
+
+    def data_api_history_coverage():
+        recs = state.get("resolved_recs") or []
+        rows = []
+        for r in recs[:10]:
+            tok = r["token_ids"][r["ref_index"]]
+            try:
+                clob_n = len(clob.price_history(tok, 360))
+            except Exception as e:  # noqa: BLE001
+                clob_n = f"error {type(e).__name__}"
+            try:
+                dapi_n = len(data_api.price_history(tok))
+            except Exception as e:  # noqa: BLE001
+                dapi_n = f"error {type(e).__name__}"
+            rows.append({"id": r["id"], "clob_points": clob_n, "data_api_points": dapi_n})
+        with_any = sum(1 for x in rows if (isinstance(x["clob_points"], int) and x["clob_points"]) or
+                       (isinstance(x["data_api_points"], int) and x["data_api_points"]))
+        return bool(rows) and with_any > 0, {"tested": len(rows), "with_history_any_source": with_any, "rows": rows}
+
+    def data_api_resolution_agreement():
+        from .dataapi import compare_resolutions
+        recs = [r for r in (state.get("resolved_recs") or []) if r.get("condition_id")][:20]
+        ours = {r["condition_id"]: r["resolved_outcome"] for r in recs}
+        cmp = compare_resolutions(ours, data_api.resolutions(list(ours)))
+        return cmp["disagree"] == 0 and cmp["agree"] > 0, cmp
+
     _check(report, "gamma_open_first_page", open_page)
     _check(report, "gamma_full_open_scan", full_scan)
     _check(report, "gamma_deep_offset", deep_offset)
     _check(report, "clob_price_history_resolved", closed_history)
     _check(report, "clob_order_books", books)
+    _check(report, "data_api_v2_status", data_api_status)
+    _check(report, "data_api_v2_history_coverage", data_api_history_coverage)
+    _check(report, "data_api_v2_resolution_agreement", data_api_resolution_agreement)
     return {"checked_at": datetime.now(timezone.utc).isoformat(),
             "passed": sum(c["ok"] for c in report), "total": len(report), "checks": report}
 

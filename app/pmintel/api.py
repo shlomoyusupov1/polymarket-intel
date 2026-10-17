@@ -70,6 +70,28 @@ def data_quality(m: dict, ob: dict | None) -> dict:
     return {"level": level, "issues": issues}
 
 
+def price_types(m: dict, ob: dict | None) -> dict:
+    """Four different "prices" that must never be confused. Each carries its source and time."""
+    book_ok = bool(ob and ob.get("valid"))
+    return {
+        "display": {"value": m.get("ref_price"), "what": "outcomePrices from Gamma (what polymarket.com shows; "
+                    "not necessarily tradable)", "source": "gamma", "source_time": m.get("source_updated_at"),
+                    "ingested_at": m.get("updated_at")},
+        "quoted": {"bid": m.get("best_bid"), "ask": m.get("best_ask"), "what": "Gamma's best bid/ask for the "
+                   "first outcome (top of book as reported by Gamma, no size)", "source": "gamma",
+                   "source_time": m.get("source_updated_at")},
+        "book": None if not ob else {"valid": ob.get("valid"), "bid": ob.get("best_bid"), "ask": ob.get("best_ask"),
+                                     "levels": [ob.get("n_bids"), ob.get("n_asks")], "what": "CLOB order book "
+                                     "snapshot; valid = both sides present and bid < ask", "source": "clob",
+                                     "source_time": ob.get("book_ts"), "ingested_at": ob.get("fetched_at")},
+        "executable": None if not book_ok else {
+            "buy_100": ob.get("buy_vwap_100"), "buy_1000": ob.get("buy_vwap_1000"),
+            "sell_100": ob.get("sell_vwap_100"), "sell_1000": ob.get("sell_vwap_1000"),
+            "what": "volume-weighted price to fill $100 / $1,000 by walking the book (None = not enough depth)",
+            "source": "clob", "source_time": ob.get("book_ts"), "ingested_at": ob.get("fetched_at")},
+    }
+
+
 @asynccontextmanager
 async def lifespan(_app):
     global pool
@@ -115,7 +137,8 @@ def health():
 LIST_COLS = """id, question, category, outcomes, outcome_prices, ref_outcome, ref_price, best_bid, best_ask,
                spread, volume, volume_24h, liquidity, end_date, url, updated_at, one_day_change,
                accepting_orders, event_slug"""
-TRADABLE = "active AND NOT closed AND accepting_orders IS NOT FALSE AND enable_order_book IS NOT FALSE"
+# Tradable only when Gamma explicitly says so: acceptingOrders = NULL is "unknown", not "tradable".
+TRADABLE = "active AND NOT closed AND accepting_orders IS TRUE AND enable_order_book IS TRUE"
 
 
 @app.get("/api/overview")
@@ -216,10 +239,13 @@ def market(market_id: str, days: int = Query(30, le=365)):
                           ORDER BY ts""", (market_id, days))
     m["history"] = q("SELECT ts, price FROM price_history WHERE market_id = %s ORDER BY ts", (market_id,))
     ob = q("""SELECT ts, best_bid, best_ask, spread, bid_depth_5c, ask_depth_5c, buy_vwap_100,
-                     buy_vwap_1000, sell_vwap_100, sell_vwap_1000, valid, n_bids, n_asks
+                     buy_vwap_1000, sell_vwap_100, sell_vwap_1000, valid, n_bids, n_asks, book_ts, fetched_at
               FROM orderbooks WHERE market_id = %s ORDER BY ts DESC LIMIT 1""", (market_id,))
     m["orderbook"] = ob[0] if ob else None
     m["data_quality"] = data_quality(m, m["orderbook"])
+    m["prices"] = price_types(m, m["orderbook"])
+    m["rules_versions"] = q("""SELECT rules_hash, first_seen_at FROM market_rules WHERE market_id = %s
+                               ORDER BY first_seen_at""", (market_id,))
     m.update(DECISION)
     return m
 

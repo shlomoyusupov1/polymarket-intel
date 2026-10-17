@@ -362,11 +362,32 @@ PAGES.detail = async (view, id) => {
           h("div", { class: "detail-actions", style: "margin:8px 0" }, h("span", { class: "badge " + ({ good: "ok", limited: "wait", bad: "bad" }[dq.level]) },
             { good: "טובה", limited: "חלקית", bad: "לא מספקת" }[dq.level])),
           dq.issues.length ? h("ul", { class: "clean" }, dq.issues.map((i) => h("li", null, i))) : h("div", { class: "sub" }, "אין בעיות ידועות")),
+        priceTypesCard(m.prices, m.accepting_orders),
         h("section", { class: "card" }, h("h2", null, "ספר פקודות ומחיר ביצוע"), h("div", { class: "sub", style: "margin-bottom:10px" }, "חי מ-CLOB · מתעדכן כל 30 שניות"), bookBox))));
   loadChart("1w");
   loadBook();
 };
 const stat = (l, v) => h("div", null, h("div", { class: "l" }, l), h("div", { class: "v" }, ltr(v)));
+// Four different "prices" that are easy to confuse: show each with what it is, its source and time.
+function priceTypesCard(p, accepting) {
+  if (!p) return null;
+  const when = (t) => t ? ago(t) : "לא ידוע";
+  const row = (name, value, what, src, t) => h("tr", null, h("td", null, h("strong", null, name), h("div", { class: "faint" }, what)),
+    h("td", null, value), h("td", null, h("div", null, src), h("div", { class: "faint" }, "זמן מקור: " + when(t))));
+  const ex = p.executable;
+  return card("ארבעה סוגי מחיר", accepting === true ? "השוק מקבל פקודות (אומת ב-Gamma)" : accepting === false ? "השוק לא מקבל פקודות" : "לא ידוע אם השוק מקבל פקודות — לא נחשב סחיר",
+    h("div", { class: "scroll-x" }, h("table", { class: "t" },
+      h("thead", null, h("tr", null, ["סוג", "ערך", "מקור"].map((x) => h("th", null, x)))),
+      h("tbody", null,
+        row("מחיר תצוגה", ltr(pct(p.display.value)), "מה שמוצג באתר Polymarket. לא בהכרח אפשר לקנות בו", "Gamma", p.display.source_time),
+        row("Bid / Ask מדווח", ltr(`${cents(p.quoted.bid)} / ${cents(p.quoted.ask)}`), "הצעה הכי טובה לפי Gamma, בלי כמות", "Gamma", p.quoted.source_time),
+        p.book ? row("ספר פקודות", p.book.valid ? h("span", { class: "badge ok" }, "תקין") : h("span", { class: "badge bad" }, "לא תקין"),
+          "שני הצדדים קיימים ו-Bid קטן מ-Ask", "CLOB", p.book.source_time || p.book.ingested_at)
+          : row("ספר פקודות", "—", "לא נאסף לשוק הזה", "CLOB", null),
+        ex ? row("מחיר בר-ביצוע", h("div", null, ltr(`$100: ${cents(ex.buy_100)}`), h("div", null, ltr(`$1,000: ${ex.buy_1000 == null ? "אין עומק" : cents(ex.buy_1000)}`))),
+          "מחיר ממוצע לקנייה בפועל לפי עומק הספר", "CLOB", ex.source_time || ex.ingested_at)
+          : row("מחיר בר-ביצוע", "—", "אין ספר תקין, אי אפשר לחשב", "CLOB", null)))));
+}
 
 function bookView(b) {
   if (b.empty) return empty("ספר הפקודות ריק");

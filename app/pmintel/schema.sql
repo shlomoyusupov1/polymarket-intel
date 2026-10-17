@@ -231,3 +231,21 @@ CREATE TABLE IF NOT EXISTS host_metrics (
     db_bytes      bigint
 );
 CREATE INDEX IF NOT EXISTS host_metrics_ts_idx ON host_metrics (ts DESC);
+
+-- Provenance (2026-10-18): source time vs ingest time, resolution-terms versions, data source
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS source_updated_at timestamptz;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS rules_hash text;
+CREATE TABLE IF NOT EXISTS market_rules (
+    market_id         text NOT NULL,
+    rules_hash        text NOT NULL,
+    description       text,
+    resolution_source text,
+    end_date          timestamptz,
+    outcomes          jsonb,
+    first_seen_at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (market_id, rules_hash)
+);
+ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS source_ts timestamptz;
+ALTER TABLE orderbooks ADD COLUMN IF NOT EXISTS book_ts timestamptz;
+ALTER TABLE price_history ADD COLUMN IF NOT EXISTS source text;
+ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS detail jsonb;
