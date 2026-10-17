@@ -67,7 +67,7 @@ async def run(args):
     db.init_schema(conn)
     cl = client()
     if cl is None:
-        if args.login or args.list_chats or args.history:
+        if args.login or args.list_chats or args.history or args.scan:
             raise SystemExit("TG_API_ID / TG_API_HASH are not set in .env")
         log.info("Telegram not configured; updating outcomes only")
         await outcome_loop(conn)
@@ -81,6 +81,30 @@ async def run(args):
     await cl.connect()
     if not await cl.is_user_authorized():
         raise SystemExit("not logged in: run with --login first")
+    if args.scan:
+        # count messages that name a stock symbol per group; nothing is stored
+        since = datetime.now(timezone.utc) - timedelta(days=args.scan)
+        stats = []
+        async for d in cl.iter_dialogs():
+            if not (d.is_group or d.is_channel):
+                continue
+            n_msgs = n_tips = 0
+            syms: set[str] = set()
+            async for m in cl.iter_messages(d.entity, limit=1500):
+                if m.date < since:
+                    break
+                n_msgs += 1
+                found, _ = tips.extract(m.message or "")
+                if found:
+                    n_tips += 1
+                    syms.update(found)
+            if n_tips:
+                stats.append((n_tips, n_msgs, len(syms), d.id, d.name))
+        stats.sort(reverse=True)
+        print(f"groups with stock symbols in the last {args.scan} days (tip msgs / all msgs / distinct symbols):")
+        for n_tips, n_msgs, n_syms, cid, name in stats[:40]:
+            print(f"{n_tips:5d} {n_msgs:6d} {n_syms:4d}  {cid}\t{name}")
+        return
     if args.list_chats:
         async for d in cl.iter_dialogs():
             if d.is_group or d.is_channel:
@@ -121,6 +145,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--login", action="store_true")
     ap.add_argument("--list-chats", action="store_true")
+    ap.add_argument("--scan", type=int, default=0, help="rank groups by stock-symbol messages in the last N days (stores nothing)")
     ap.add_argument("--history", type=int, default=0, help="import the last N days, then exit")
     asyncio.run(run(ap.parse_args()))
 
