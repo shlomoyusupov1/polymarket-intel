@@ -164,10 +164,11 @@ def overview():
                 ORDER BY id DESC LIMIT 1""")
     supported = []
     if hist:
+        # only walk-forward verdicts count (out of sample + Holm + 2x costs + live execution check)
         for hz, res in (hist[0]["result"] or {}).items():
-            for s in res.get("strategies", []):
-                if s.get("edge_supported"):
-                    supported.append({"horizon_h": hz, **s})
+            wf = res.get("walk_forward") or {}
+            if wf.get("edge_supported"):
+                supported.append({"horizon_h": hz, "verdict": wf.get("verdict"), **(wf.get("oos_trading") or {})})
     health_now = health()
     return {
         "stats": stats,

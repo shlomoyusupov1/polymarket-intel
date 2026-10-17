@@ -32,7 +32,7 @@ def test_strategy_returns_include_slippage():
     # Buy NO at p=0.04 -> NO price 0.96 + 0.01 slippage = 0.97; NO wins -> 1/0.97 - 1
     s = strategy(rows([(0.04, 0, "a")]), "NO", 0.0, 0.05, slippage=0.01, fee=0.0)
     assert math.isclose(s["mean_return"], 1 / 0.97 - 1)
-    assert s["trades"] == 1 and s["events"] == 1 and s["edge_supported"] is False
+    assert s["trades"] == 1 and s["events"] == 1 and s["insample_ci_positive"] is False
 
 
 def test_strategy_losing_trade_is_minus_100pct():
@@ -53,9 +53,9 @@ def test_edge_requires_enough_events_and_positive_ci():
     spec = [(0.02, 0, f"e{i}") for i in range(40)]  # all win, tiny return, zero variance
     s = strategy(rows(spec), "NO", 0.0, 0.05, slippage=0.0, fee=0.0)
     assert s["events"] == 40
-    assert s["edge_supported"] is False  # zero variance -> no stderr -> not claimed
+    assert s["insample_ci_positive"] is False  # zero variance -> no stderr -> not claimed
     few = strategy(rows([(0.02, 0, "a"), (0.02, 0, "b"), (0.02, 1, "c")]), "NO", 0, 0.05, 0, 0)
-    assert few["edge_supported"] is False
+    assert few["insample_ci_positive"] is False
 
 
 def test_month_windows_cover_range_without_gaps():

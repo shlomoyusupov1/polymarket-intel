@@ -512,8 +512,31 @@ PAGES.research = async (view) => {
           h("td", null, `${x.side} `, ltr(`${pct(x.lo, 0)}–${pct(x.hi, 0)}`)), h("td", null, ltr(`${x.trades}/${x.events}`)),
           h("td", null, ltr(pct(x.mean_return), x.mean_return >= 0 ? "up" : "down")),
           h("td", null, x.ci_lo == null ? "—" : ltr(`${pct(x.ci_lo)} … ${pct(x.ci_hi)}`)),
-          h("td", null, h("span", { class: "badge " + (x.edge_supported ? "ok" : "") }, x.edge_supported ? "נתמך" : "לא הוכח"))))))))))));
+          h("td", null, h("span", { class: "badge" }, x.insample_ci_positive ? "חיובי בתוך המדגם בלבד" : "לא הוכח")))))))),
+      wfCard(res.walk_forward)))));
 };
+const WF_VERDICT = { supported: ["ok", "נתמך — עבר את כל השערים"], oos_positive_needs_execution_check: ["wait", "חיובי מחוץ למדגם — עדיין לא אומת ביצוע בספר פקודות"],
+  not_supported: ["", "לא נתמך"], insufficient_data: ["", "אין מספיק נתונים"] };
+function wfCard(w) {
+  if (!w) return null;
+  const [cls, label] = WF_VERDICT[w.verdict] || ["", w.verdict];
+  const f = w.forecast, o = w.oos_trading, g = w.gates || {};
+  const gate = (ok, text) => h("li", null, ok ? "✓ " : "✗ ", text);
+  return card("בדיקה מחוץ למדגם (Walk-Forward)", "מאמנים על העבר, בודקים על התקופה שאחריו. בלי מידע עתידי, אירועים קשורים מוצאים מהאימון",
+    h("div", { class: "detail-actions", style: "margin-bottom:8px" }, h("span", { class: "badge " + cls }, label)),
+    w.verdict === "insufficient_data" ? h("p", { class: "sub" }, w.reason) : h("div", { class: "stack" },
+      f ? h("div", { class: "stats" },
+        stat("Brier — מחיר השוק", f.market_brier.toFixed(4)), stat("Brier — כיול מחדש", f.model_brier.toFixed(4)),
+        stat("Log loss — שוק / מודל", `${f.market_log_loss.toFixed(3)} / ${f.model_log_loss.toFixed(3)}`)) : null,
+      f ? h("p", { class: "sub" }, f.model_beats_market ? "הכיול מחדש ניבא טוב יותר מהשוק מחוץ למדגם." : "שום מודל לא ניבא טוב יותר ממחיר השוק מחוץ למדגם.") : null,
+      o ? h("p", { class: "sub" }, `כלל מסחר שנבחר באימון ונבדק אחריו: ${o.events} אירועים, תשואה ממוצעת `, ltr(pct(o.mean_return)),
+        o.ci ? h("span", null, " (טווח 95%: ", ltr(`${pct(o.ci[0])} … ${pct(o.ci[1])}`), ")") : null) : null,
+      h("ul", { class: "clean" },
+        gate(g.oos_ci_above_zero_30_events, "רווח מחוץ למדגם, לפחות 30 אירועים, כל הטווח מעל 0"),
+        gate(g.survives_holm, "שורד תיקון לבדיקה של הרבה כללים (Holm)"),
+        gate(g.positive_at_2x_slippage, "נשאר חיובי גם עם החלקה כפולה"),
+        gate(g.execution_validated, "אומת שאפשר לבצע בספר פקודות חי"))));
+}
 function reliability(buckets) {
   const W = 300, P = 30;
   const X = (v) => P + v * (W - 2 * P), Y = (v) => W - P - v * (W - 2 * P);
