@@ -54,7 +54,7 @@ def record(conn, source: str, symbol: str, ts: datetime, mentioned_price: float 
     verdict = flags = None
     if check is None:
         try:
-            bars, meta = stockcheck.fetch(symbol)
+            bars, meta = _cached_fetch(symbol)
             check = stockcheck.assess([b for b in bars if b["day"] <= ts.astimezone(NY).date().isoformat()], meta)
         except Exception as e:  # noqa: BLE001 - unknown/delisted symbols are still recorded
             log.info("check failed for %s: %s", symbol, e)
@@ -67,6 +67,20 @@ def record(conn, source: str, symbol: str, ts: datetime, mentioned_price: float 
                        (source, kind, chat_id, message_id, ts, symbol, mentioned_price, verdict,
                         Jsonb(flags) if flags is not None else None)).fetchone()
     return row[0]
+
+
+_FETCH: dict[str, tuple[float, tuple]] = {}
+
+
+def _cached_fetch(symbol: str):
+    """One Yahoo request per symbol per 10 minutes (a history import mentions the same symbols often)."""
+    import time as _t
+    hit = _FETCH.get(symbol)
+    if hit and _t.monotonic() - hit[0] < 600:
+        return hit[1]
+    val = stockcheck.fetch(symbol)
+    _FETCH[symbol] = (_t.monotonic(), val)
+    return val
 
 
 def outcome(bars: list[dict], tip_ts: datetime) -> dict | None:

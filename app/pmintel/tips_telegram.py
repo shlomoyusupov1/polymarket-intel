@@ -27,9 +27,10 @@ def chats_wanted() -> list[str]:
     return [c.strip() for c in os.environ.get("TG_CHATS", "").split(",") if c.strip()]
 
 
-def matches(entity, wanted: list[str]) -> bool:
-    title = (getattr(entity, "title", None) or "").strip()
-    return str(getattr(entity, "id", "")) in wanted or title in wanted
+def matches(dialog_id, title: str, wanted: list[str]) -> bool:
+    """TG_CHATS holds the ids printed by --list-chats/--scan (marked form, e.g. -1001234567890)
+    or titles. Production bug 2026-10-17: comparing the entity's bare id matched nothing."""
+    return str(dialog_id) in wanted or (title or "").strip() in wanted
 
 
 def handle(conn, title: str, chat_id, msg_id, date: datetime, text: str) -> int:
@@ -113,8 +114,9 @@ async def run(args):
     wanted = chats_wanted()
     if not wanted:
         log.warning("TG_CHATS is empty: no groups will be read")
-    dialogs = [d async for d in cl.iter_dialogs() if (d.is_group or d.is_channel) and matches(d.entity, wanted)]
+    dialogs = [d async for d in cl.iter_dialogs() if (d.is_group or d.is_channel) and matches(d.id, d.name, wanted)]
     log.info("reading %d groups: %s", len(dialogs), [d.name for d in dialogs])
+    print(f"reading {len(dialogs)} of {len(wanted)} configured groups")
     if args.history:
         since = datetime.now(timezone.utc) - timedelta(days=args.history)
         total = 0

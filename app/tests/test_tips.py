@@ -47,6 +47,7 @@ def test_record_dedup_outcomes_and_api(monkeypatch):
     db.init_schema(conn)
     b = bars(DAYS, [4.2] * 10, [4.3, 4.0, 3.0, 2.0, 1.5, 1.2, 1.1, 1.0, 0.9, 0.8])
     monkeypatch.setattr(stockcheck, "fetch", lambda sym, client=None: (b, {}))
+    tips._FETCH.clear()
     ts = datetime(2026, 10, 12, 21, 0, tzinfo=timezone.utc)
     assert tips.record(conn, "Group A", "PSIG", ts, 4.21, kind="telegram", chat_id="1", message_id="9")
     assert tips.record(conn, "Group A", "PSIG", ts, 4.21) is None  # same source+symbol within 24 h
@@ -65,3 +66,11 @@ def test_record_dedup_outcomes_and_api(monkeypatch):
         assert tc.post("/api/tips", json={"symbol": "psig", "source": "וואטסאפ הילה"}).status_code == 409
         assert tc.post("/api/tips", json={"symbol": "bad sym!", "source": "x"}).status_code == 400
     conn.close()
+
+
+def test_group_matching_uses_the_marked_id_from_list_chats():
+    from pmintel.tips_telegram import matches
+    wanted = ["-1001209544486", "שוק ההון כלכליסט"]
+    assert matches(-1001209544486, "אינטראקטיב ישראל", wanted)
+    assert matches(-1001239039686, "שוק ההון כלכליסט", wanted)
+    assert not matches(1209544486, "x", wanted)  # bare entity id is not what --list-chats prints
