@@ -45,7 +45,7 @@ def extract(text: str) -> tuple[list[str], float | None]:
 
 def record(conn, source: str, symbol: str, ts: datetime, mentioned_price: float | None = None,
            kind: str = "manual", chat_id: str | None = None, message_id: str | None = None,
-           check: dict | None = None) -> int | None:
+           check: dict | None = None, source_url: str | None = None) -> int | None:
     """Insert one tip; the same source + symbol within 24 h counts once. Returns the id or None."""
     dup = conn.execute("""SELECT 1 FROM tips WHERE source = %s AND symbol = %s
                           AND ts BETWEEN %s - interval '24 hours' AND %s + interval '24 hours'""",
@@ -63,10 +63,13 @@ def record(conn, source: str, symbol: str, ts: datetime, mentioned_price: float 
     if check:
         verdict, flags = check.get("verdict"), [f["text"] for f in check.get("flags", [])]
     from psycopg.types.json import Jsonb
-    row = conn.execute("""INSERT INTO tips (source, kind, chat_id, message_id, ts, symbol, mentioned_price, verdict, flags)
-                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+    if source_url is None and kind == "telegram" and chat_id and str(chat_id).startswith("-100") and message_id:
+        source_url = f"https://t.me/c/{str(chat_id)[4:]}/{message_id}"  # opens for members of the group
+    row = conn.execute("""INSERT INTO tips (source, kind, chat_id, message_id, ts, symbol, mentioned_price, verdict, flags,
+                                            source_url)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                        (source, kind, chat_id, message_id, ts, symbol, mentioned_price, verdict,
-                        Jsonb(flags) if flags is not None else None)).fetchone()
+                        Jsonb(flags) if flags is not None else None, source_url)).fetchone()
     return row[0]
 
 

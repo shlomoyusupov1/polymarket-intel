@@ -249,3 +249,5 @@ ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS source_ts timestamptz;
 ALTER TABLE orderbooks ADD COLUMN IF NOT EXISTS book_ts timestamptz;
 ALTER TABLE price_history ADD COLUMN IF NOT EXISTS source text;
 ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS detail jsonb;
+ALTER TABLE tips ADD COLUMN IF NOT EXISTS source_url text;
+ALTER TABLE sec_events ADD COLUMN IF NOT EXISTS url text;

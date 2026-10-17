@@ -19,7 +19,7 @@ import re
 from datetime import date, datetime, time, timedelta
 
 from . import db, stockcheck, tips
-from .sec_insider import ET_TZ, Sec
+from .sec_insider import BASE, ET_TZ, Sec
 
 log = logging.getLogger("sec.events")
 SOURCE_13D = "SEC: משקיע אקטיביסט (13D)"
@@ -113,9 +113,9 @@ def process_day(conn, sec: Sec, day: date, tickers: dict[int, str]) -> dict:
         sym = tickers.get(hd["subject_cik"] or -1)
         if not sym or not hd["accepted"] or hd["filer_cik"] == hd["subject_cik"]:
             continue
-        cur = conn.execute("INSERT INTO sec_events (accession, kind, symbol, accepted) VALUES (%s,'13d',%s,%s) "
-                           "ON CONFLICT DO NOTHING", (acc, sym, hd["accepted"]))
-        if cur.rowcount and tips.record(conn, SOURCE_13D, sym, hd["accepted"], kind="sec"):
+        cur = conn.execute("INSERT INTO sec_events (accession, kind, symbol, accepted, url) VALUES (%s,'13d',%s,%s,%s) "
+                           "ON CONFLICT DO NOTHING", (acc, sym, hd["accepted"], BASE + path))
+        if cur.rowcount and tips.record(conn, SOURCE_13D, sym, hd["accepted"], kind="sec", source_url=BASE + path):
             stats["13d"] += 1
     for path in index_paths(idx, ("8-K",)):
         cik = int(path.split("/")[2]) if path.count("/") >= 3 else None
@@ -127,8 +127,8 @@ def process_day(conn, sec: Sec, day: date, tickers: dict[int, str]) -> dict:
         hd = header(text)
         if not hd["accepted"] or not any("Results of Operations" in i for i in hd["items"]):
             continue
-        cur = conn.execute("INSERT INTO sec_events (accession, kind, symbol, accepted) VALUES (%s,'earnings',%s,%s) "
-                           "ON CONFLICT DO NOTHING", (acc, sym, hd["accepted"]))
+        cur = conn.execute("INSERT INTO sec_events (accession, kind, symbol, accepted, url) VALUES (%s,'earnings',%s,%s,%s) "
+                           "ON CONFLICT DO NOTHING", (acc, sym, hd["accepted"], BASE + path))
         stats["earnings"] += cur.rowcount
     conn.execute("INSERT INTO sec_events_done (day) VALUES (%s) ON CONFLICT DO NOTHING", (day,))
     return stats
@@ -136,14 +136,14 @@ def process_day(conn, sec: Sec, day: date, tickers: dict[int, str]) -> dict:
 
 def evaluate_pending(conn, fetch=stockcheck.fetch) -> int:
     """Turn earnings events into tips once their reaction day has closed."""
-    rows = conn.execute("""SELECT accession, symbol, accepted FROM sec_events
+    rows = conn.execute("""SELECT accession, symbol, accepted, url FROM sec_events
                            WHERE kind = 'earnings' AND evaluated_at IS NULL
                              AND accepted > now() - interval '45 days'""").fetchall()
     if not rows:
         return 0
     spy = fetch("SPY")[0]
     n = 0
-    for acc, sym, accepted in rows:
+    for acc, sym, accepted, url in rows:
         try:
             bars = tips._cached_fetch(sym)[0] if fetch is stockcheck.fetch else fetch(sym)[0]
         except Exception as e:  # noqa: BLE001
@@ -157,7 +157,7 @@ def evaluate_pending(conn, fetch=stockcheck.fetch) -> int:
                      (ev["reaction_day"], ev["ret"], ev["excess"], ev["signal"], acc))
         if ev["signal"]:
             ts = datetime.combine(date.fromisoformat(ev["reaction_day"]), time(16, 1), ET_TZ)
-            if tips.record(conn, SOURCE_PEAD, sym, ts, kind="sec"):
+            if tips.record(conn, SOURCE_PEAD, sym, ts, kind="sec", source_url=url):
                 n += 1
     return n
 

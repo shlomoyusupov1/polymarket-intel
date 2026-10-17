@@ -100,6 +100,7 @@ const ROUTES = [
   { id: "scanner", path: "#/scanner", label: "סורק הזדמנויות", short: "הזדמנויות", icon: "radar", nav: "both" },
   { id: "watchlist", path: "#/watchlist", label: "רשימת מעקב", short: "מעקב", icon: "star", nav: "both" },
   { id: "research", path: "#/research", label: "מעבדת מחקר", icon: "lab", nav: "side" },
+  { id: "evidence", path: "#/evidence", label: "לוח ראיות — מניות במעקב", icon: "lab", nav: "side" },
   { id: "check", path: "#/check", label: "בודק מניות חשודות", icon: "shield", nav: "side" },
   { id: "tips", path: "#/tips", label: "מעקב טיפים", icon: "radar", nav: "side" },
   { id: "etf", path: "#/etf", label: "חדר מסחר ETF (נייר)", icon: "wallet", nav: "side" },
@@ -127,7 +128,7 @@ function route() {
   else if (mc) { id = "check"; arg = decodeURIComponent(mc[1]); }
   else { const r = ROUTES.find((x) => x.path === hash); if (r) id = r.id; }
   current = id;
-  const navId = id === "detail" ? "markets" : (["research", "check", "tips", "etf", "portfolio", "alerts", "system"].includes(id) && innerWidth < 960 ? "more" : id);
+  const navId = id === "detail" ? "markets" : (["research", "evidence", "check", "tips", "etf", "portfolio", "alerts", "system"].includes(id) && innerWidth < 960 ? "more" : id);
   document.querySelectorAll("[data-route]").forEach((a) => a.toggleAttribute("aria-current", false));
   document.querySelectorAll(`[data-route="${navId}"], #side-nav [data-route="${id === "detail" ? "markets" : id}"]`)
     .forEach((a) => a.setAttribute("aria-current", "page"));
@@ -549,6 +550,43 @@ function reliability(buckets) {
     buckets.map((b) => [s("line", { x1: X(b.mean_price), x2: X(b.mean_price), y1: Y(b.ci_lo), y2: Y(b.ci_hi), stroke: "#5B9BFF", "stroke-width": 1.5 }),
       s("circle", { cx: X(b.mean_price), cy: Y(b.freq), r: 3 + 6 * Math.sqrt(b.n / maxN), fill: "#5B9BFF", "fill-opacity": 0.85 })]));
 }
+
+// ---- Evidence board (watchlist) ----
+const KIND = { sec: "דיווח רשמי ל-SEC", telegram: "טלגרם", manual: "רישום ידני" };
+PAGES.evidence = async (view) => {
+  const d = await api("/api/evidence");
+  if (current !== "evidence") return;
+  const pctOrDash = (v) => v == null ? h("span", { class: "faint" }, "—") : ltr(pct(v, 1), v >= 0 ? "up" : "down");
+  const finding = (f) => h("div", { class: "card", style: "padding:12px" },
+    h("div", { class: "detail-actions" },
+      h("span", { class: "badge " + (f.official ? "ok" : "") }, KIND[f.kind] || f.kind),
+      h("strong", null, f.source),
+      f.risk_verdict ? h("span", { class: "badge " + ({ red: "bad", yellow: "wait", green: "ok" }[f.risk_verdict] || "") }, "סיכון: " + ({ red: "אדום", yellow: "צהוב", green: "ירוק" }[f.risk_verdict] || f.risk_verdict)) : null),
+    h("div", { class: "stats", style: "margin-top:10px" },
+      stat("פורסם", new Date(f.published_at).toLocaleString("he-IL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })),
+      stat("מחיר לפני הפרסום", f.prior_close == null ? "—" : "$" + f.prior_close.toFixed(2)),
+      stat("מחיר עכשיו", f.current == null ? "—" : "$" + f.current.toFixed(2)),
+      h("div", null, h("div", { class: "l" }, "שינוי מאז"), h("div", { class: "v" }, pctOrDash(f.change_since))),
+      h("div", null, h("div", { class: "l" }, "אחרי 5 ימים"), h("div", { class: "v" }, pctOrDash(f.r5))),
+      h("div", null, h("div", { class: "l" }, "מול SPY (5 ימים)"), h("div", { class: "v" }, pctOrDash(f.excess_r5)))),
+    h("div", { class: "detail-actions", style: "margin-top:8px" },
+      safeUrl(f.source_url) ? h("a", { class: "btn", href: safeUrl(f.source_url), target: "_blank", rel: "noopener noreferrer" }, "למקור", icon("ext", 16)) : h("span", { class: "faint" }, "אין קישור למקור"),
+      h("a", { class: "btn", href: "#/check/" + encodeURIComponent(f.symbol || "") }, "בדיקת סיכון")),
+    h("div", { class: "sub", style: "margin-top:8px" }, "איכות הנתונים: " + (f.data_quality.join(" · ") || "תקינה")),
+    h("div", { class: "faint", style: "margin-top:4px" }, "מה עוד לא ידוע: " + f.unknown.join(" · ")));
+  const pm = (m) => h("div", { class: "card", style: "padding:12px" },
+    h("div", { class: "detail-actions" }, h("span", { class: "badge info" }, "Polymarket · התאמה לפי שם החברה"),
+      h("a", { href: "#/m/" + encodeURIComponent(m.id), dir: "auto" }, m.question)),
+    h("div", { class: "sub", style: "margin-top:6px" }, "מחיר: ", ltr(pct(m.price)), " · שינוי יומי: ", ptsEl(m.one_day_change)),
+    m.resolution_risk.length ? h("ul", { class: "clean" }, m.resolution_risk.map((r) => h("li", null, r))) : h("div", { class: "faint" }, "לא זוהו סיכוני הכרעה בולטים"),
+    h("div", { class: "faint" }, m.unknown.join(" · ")));
+  view.replaceChildren(h("div", { class: "stack" },
+    h("p", { class: "sub" }, d.note),
+    ...d.watchlist.map((w) => card(w.symbol,
+      w.price == null ? "אין נתוני מחיר" : h("span", null, ltr("$" + w.price.toFixed(2)), " · ", pctOrDash(w.day_change), " ביום האחרון · ", w.price_day),
+      w.findings.length ? h("div", { class: "stack" }, w.findings.map((f) => finding({ ...f, symbol: w.symbol }))) : empty("אין ממצאים ב-60 הימים האחרונים"),
+      w.polymarket.length ? h("div", { class: "stack", style: "margin-top:10px" }, w.polymarket.map(pm)) : null))));
+};
 
 // ---- Suspicious-stock checker ----
 const VERDICT = { red: ["bad", "אדום — דגלים של ניפוח מחיר (pump). לא להיכנס."], yellow: ["wait", "צהוב — יש סימני סיכון, לבדוק לעומק."],

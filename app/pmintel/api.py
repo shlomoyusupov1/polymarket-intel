@@ -407,3 +407,14 @@ def macro(limit: int = Query(12, le=50)):
                  WHERE {TRADABLE} AND liquidity >= 5000 AND ref_price BETWEEN 0.02 AND 0.98
                    AND question ILIKE ANY(%s)
                  ORDER BY volume_24h DESC NULLS LAST LIMIT %s""", (MACRO_PATTERNS, limit))
+
+
+@app.get("/api/evidence")
+def evidence_board(symbols: str | None = Query(None, max_length=200)):
+    """Watchlist evidence: per finding source, link, time, price before/now, quality, unknowns."""
+    from . import evidence, stockcheck
+    syms = None
+    if symbols:
+        syms = [s.strip().upper() for s in symbols.split(",") if stockcheck.SYMBOL_RE.match(s.strip().upper())][:20]
+    with db.connect() as c:
+        return cached(("evidence", tuple(syms or [])), 300, lambda: evidence.board(c, symbols=syms))
