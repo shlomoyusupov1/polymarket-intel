@@ -100,10 +100,9 @@ scripts/       oracle-setup.sh, set-password.sh
 נשמרים רק: סימול, מחיר שנאמר, שם הקבוצה, זמן. בלי תוכן הודעות ובלי פרטי חברי הקבוצה. המערכת אף פעם לא כותבת.
 
 1. היכנס ל-https://my.telegram.org ← API development tools ← צור אפליקציה. תקבל `api_id` ו-`api_hash`.
-2. בשרת: `nano ~/polymarket-intel/.env` והוסף בסוף (בלי לשלוח את הערכים לאף אחד):
+2. בשרת (השרת לא כולל nano; הפקודה שואלת ושומרת ב-.env):
    ```
-   TG_API_ID=12345678
-   TG_API_HASH=abcdef...
+   read -p "api_id: " A; read -p "api_hash: " B; printf 'TG_API_ID=%s\nTG_API_HASH=%s\n' "$A" "$B" >> ~/polymarket-intel/.env
    ```
 3. התחברות חד-פעמית (טלגרם ישלח לך קוד):
    ```
