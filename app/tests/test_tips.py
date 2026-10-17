@@ -96,3 +96,37 @@ def test_source_gate_needs_sample_consistency_and_breadth():
     flip = [(f"S{i}", (0.01 if rnd.random() < 0.5 else -0.01), 0.0) for i in range(80)]
     assert tips.source_gate(flip)["status"] in ("not_reliable", "promising")
     assert tips.source_gate(flip)["status"] != "reliable"
+
+
+def test_spread_estimator_recovers_a_pure_spread_and_costs_flow_into_outcomes():
+    from pmintel import costs
+    # zero volatility, every day trades between bid and ask 4% apart -> estimator returns ~4%
+    flat = [{"day": f"d{i}", "o": 10, "h": 10.2, "l": 9.8, "c": 10} for i in range(20)]
+    assert abs(costs.cs_spread(flat) - 0.04) < 0.001
+    c, src = costs.round_trip(flat)
+    assert src == "corwin_schultz" and abs(c - (0.04 + costs.FEE_RT)) < 0.001
+    assert costs.round_trip(flat[:2]) == (costs.fallback(10), "price_tier")
+    assert costs.fallback(0.5) > costs.fallback(3) > costs.fallback(50)
+    b = bars(DAYS, [10] * 10, [10] * 10)
+    o = tips.outcome(b, datetime(2026, 10, 19, 15, 0, tzinfo=timezone.utc))
+    assert o["cost_src"] == "corwin_schultz" and o["cost_rt"] > costs.FEE_RT
+
+
+def test_wide_spread_turns_a_paper_winner_into_a_loser():
+    # beats SPY by 3% before costs, but each stock costs 5% to trade -> not reliable, negative edge
+    rows = [(f"S{i % 30}", 0.03, 0.0, 0.05, 0.8) for i in range(60)]
+    g = tips.source_gate(rows)
+    assert g["edge_after_cost"] < 0 and g["status"] == "not_reliable" and g["success_rate"] == 0
+    # unknown cost on a sub-$1 stock falls back to the conservative tier, not to 0.2%
+    assert tips.source_gate([("P", 0.03, 0.0, None, 0.5)] * 40)["edge_after_cost"] < 0
+
+
+def test_holm_downgrades_a_lucky_source_among_many():
+    good = {"n": 60, "p_edge": 0.02, "status": "reliable"}
+    gates = {"A": dict(good)} | {f"N{i}": {"n": 60, "p_edge": 0.5, "status": "not_reliable"} for i in range(9)}
+    out = tips.apply_holm(gates)
+    assert out["A"]["status"] == "promising" and out["A"]["downgraded"] == "multiple_testing"
+    assert abs(out["A"]["p_holm"] - 0.2) < 1e-12 and out["A"]["sources_tested"] == 10
+    strong = tips.apply_holm({"A": {"n": 60, "p_edge": 0.001, "status": "reliable"},
+                              "B": {"n": 60, "p_edge": 0.4, "status": "not_reliable"}})
+    assert strong["A"]["status"] == "reliable" and strong["B"]["p_holm"] == 0.4

@@ -279,6 +279,13 @@ def research_latest():
     return rows[0] if rows else None
 
 
+@app.get("/api/lab/latest")
+def lab_latest():
+    rows = q("""SELECT id, created_at, result FROM research_reports
+                WHERE kind = 'stocklab_v1' ORDER BY id DESC LIMIT 1""")
+    return rows[0] if rows else None
+
+
 @app.get("/api/integration/latest")
 def integration_latest():
     rows = q("""SELECT id, created_at, result FROM research_reports
@@ -378,7 +385,7 @@ def tips_overview():
     recent = q("""SELECT id, source, kind, ts, symbol, mentioned_price, verdict, flags, entry_day, entry_price,
                          r1, r5, r20, max_drawdown_20, max_runup_20 FROM tips ORDER BY ts DESC LIMIT 100""")
     return {"leaderboard": board, "recent": recent,
-            "rule": "כניסה בפתיחה הראשונה אחרי הטיפ; תשואה בסגירה אחרי 1/5/20 ימי מסחר; \"מול SPY\" = הטיפ פחות SPY באותם ימים בדיוק; בלי עמלות"}
+            "rule": "כניסה בפתיחה הראשונה אחרי הטיפ; תשואה בסגירה אחרי 1/5/20 ימי מסחר; \"מול SPY\" = הטיפ פחות SPY באותם ימים בדיוק. האמינות מחושבת אחרי עלות מסחר משוערת לכל מניה (מרווח קנייה-מכירה לפי טווח המחירים היומי + עמלות)"}
 
 
 @app.post("/api/tips", status_code=201)

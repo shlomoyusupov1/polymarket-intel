@@ -106,6 +106,13 @@ services:
     restart: "no"
     profiles: ["jobs"]
 
+  stocklab:
+    <<: *app
+    entrypoint: ["python", "-m", "pmintel.stocklab"]
+    command: []
+    restart: "no"
+    profiles: ["jobs"]
+
 volumes:
   tgdata:
   dbdata:
