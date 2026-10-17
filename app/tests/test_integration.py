@@ -127,6 +127,8 @@ def test_full_pipeline(conn, monkeypatch):
         ms = tc.get("/api/markets", params={"min_liquidity": 1000, "sort": "liquidity"}).json()
         assert [m["id"] for m in ms] == ["1", "2", "3"] and all(m["decision"] == "WAIT" for m in ms)
         assert tc.get("/api/markets", params={"search": "market 2"}).json()[0]["id"] == "2"
+        # open_only hides markets that are practically decided; all seeded ones are 30-80% and end 2026-12-31
+        assert len(tc.get("/api/markets", params={"open_only": True, "min_liquidity": 1000}).json()) == 3
         d = tc.get("/api/markets/1").json()
         assert d["url"] == "https://polymarket.com/event/ev-1" and len(d["snapshots"]) == 2
         assert d["orderbook"]["best_ask"] == 0.31 and abs(d["orderbook"]["buy_vwap_100"] - 0.31) < 1e-9

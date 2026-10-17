@@ -248,7 +248,7 @@ function pickInvestigate(changed, attention) {
 }
 
 // ---- Market Explorer ----
-const explorer = { search: "", sort: "volume_24h", minLiq: "1000", tradable: true, offset: 0 };
+const explorer = { search: "", sort: "volume_24h", minLiq: "1000", tradable: true, openOnly: true, offset: 0 };
 PAGES.markets = async (view) => {
   const list = h("div", { class: "mlist" });
   const more = h("button", { class: "btn", type: "button", hidden: true }, "טען עוד");
@@ -263,13 +263,15 @@ PAGES.markets = async (view) => {
       h("option", { value: v, selected: explorer.minLiq === v }, l)));
   const trad = h("label", { class: "check" }, h("input", { type: "checkbox", checked: explorer.tradable,
     onchange: (e) => { explorer.tradable = e.target.checked; load(true); } }), "רק סחירים");
+  const openOnly = h("label", { class: "check", title: "מסתיר שווקים שכבר כמעט הוכרעו (97%+ או 3%-) ושווקים שנסגרים תוך 24 שעות — משחקים חיים" },
+    h("input", { type: "checkbox", checked: explorer.openOnly, onchange: (e) => { explorer.openOnly = e.target.checked; load(true); } }), "בלי שווקים שכבר הוכרעו");
   let t;
   input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { explorer.search = input.value.trim(); load(true); }, 300); });
   more.addEventListener("click", () => load(false));
 
   async function load(reset) {
     if (reset) { explorer.offset = 0; list.replaceChildren(skel(6)); }
-    const p = new URLSearchParams({ sort: explorer.sort, min_liquidity: explorer.minLiq, tradable: explorer.tradable, limit: 50, offset: explorer.offset });
+    const p = new URLSearchParams({ sort: explorer.sort, min_liquidity: explorer.minLiq, tradable: explorer.tradable, open_only: explorer.openOnly, limit: 50, offset: explorer.offset });
     if (explorer.search) p.set("search", explorer.search);
     try {
       const rows = await api("/api/markets?" + p);
@@ -281,7 +283,7 @@ PAGES.markets = async (view) => {
     } catch (e) { list.replaceChildren(fail(e)); }
   }
   view.replaceChildren(
-    h("div", { class: "toolbar" }, h("div", { class: "search" }, input, icon("search", 18)), seg, liq, trad),
+    h("div", { class: "toolbar" }, h("div", { class: "search" }, input, icon("search", 18)), seg, liq, trad, openOnly),
     h("section", { class: "card" }, listHead(), list, h("div", { style: "text-align:center;margin-top:10px" }, more)));
   load(true);
 };

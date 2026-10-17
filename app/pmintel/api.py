@@ -170,9 +170,11 @@ SORTS = {"volume_24h": "volume_24h", "liquidity": "liquidity", "volume": "volume
 @app.get("/api/markets")
 def markets(search: str | None = None, category: str | None = None,
             sort: str = Query("volume_24h", enum=list(SORTS)), min_liquidity: float = 0,
-            tradable: bool = True, ids: str | None = None,
+            tradable: bool = True, ids: str | None = None, open_only: bool = False,
             limit: int = Query(50, le=200), offset: int = 0):
     where, params = [TRADABLE if tradable else "active AND NOT closed"], []
+    if open_only:  # hide practically decided markets (>=97% / <=3%) and those closing within 24 h
+        where.append("ref_price BETWEEN 0.03 AND 0.97 AND end_date > now() + interval '1 day'")
     if ids:
         id_list = [i for i in ids.split(",") if i][:200]
         where = ["id = ANY(%s)"]
