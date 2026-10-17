@@ -37,6 +37,13 @@ services:
     <<: *app
     command: ["python", "-m", "pmintel.etf_job"]
 
+  # Tip tracker: read-only Telegram listener (owner's account) + outcome updates
+  tips:
+    <<: *app
+    command: ["python", "-m", "pmintel.tips_telegram"]
+    volumes:
+      - tgdata:/data
+
   api:
     <<: *app
     command: ["uvicorn", "pmintel.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
@@ -100,6 +107,7 @@ services:
     profiles: ["jobs"]
 
 volumes:
+  tgdata:
   dbdata:
   caddy_data:
   caddy_config:

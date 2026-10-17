@@ -161,3 +161,25 @@ CREATE TABLE IF NOT EXISTS etf_intents (
     payload    jsonb NOT NULL,
     PRIMARY KEY (account, based_on)
 );
+
+-- Tip tracker (pmintel/tips.py). No message text, no sender identities.
+CREATE TABLE IF NOT EXISTS tips (
+    id              bigserial PRIMARY KEY,
+    source          text NOT NULL,          -- group title or "manual: <name>"
+    kind            text NOT NULL,          -- telegram | manual
+    chat_id         text,
+    message_id      text,
+    ts              timestamptz NOT NULL,   -- when the tip was posted
+    symbol          text NOT NULL,
+    mentioned_price double precision,
+    verdict         text,                   -- stockcheck verdict at tip time
+    flags           jsonb,
+    entry_day       date,
+    entry_price     double precision,
+    r1 double precision, r5 double precision, r20 double precision,
+    max_drawdown_20 double precision, max_runup_20 double precision,
+    outcome_at      timestamptz,
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tips_msg_uq ON tips (chat_id, message_id, symbol) WHERE message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS tips_source_idx ON tips (source, ts DESC);

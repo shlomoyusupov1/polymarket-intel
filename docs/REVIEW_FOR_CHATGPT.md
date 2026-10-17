@@ -117,6 +117,15 @@ benchmark. Service `etf` runs after each US close; UI page `#/etf`. Window 2026-
 Tests: sizing of a >$700 ETF, late/missing intents, health veto, stops/accounting, dividends,
 first-seen bars and one-time sealing against Postgres. Real-data run pending on the server.
 
+## 3f. Tip tracker (2026-10-17)
+
+`pmintel/tips.py`, service `tips`, page `#/tips`. Tips come from a read-only Telethon listener on the
+owner's own Telegram account (whitelisted groups only, nothing sent; only symbol, mentioned price,
+group title, message id and time stored) or are logged manually (`POST /api/tips`, JSON only).
+Fixed outcome rule for every source: entry at the first US open after the tip, returns at the close
+of sessions 1/5/20, worst drawdown / best run-up within 20 sessions, no costs (stated as optimistic).
+Each tip also stores the stockcheck verdict at tip time. Leaderboard per source.
+
 ## 4. What I'd like challenged
 1. Keyset `after_cursor` name was inferred from a third-party Go client; production scan passed, but
    please confirm against official docs.

@@ -93,3 +93,27 @@ web/           דשבורד סטטי (vanilla JS, ללא build)
 caddy/         HTTPS + auth + reverse proxy
 scripts/       oracle-setup.sh, set-password.sh
 ```
+
+## מעקב טיפים מטלגרם (קריאה בלבד)
+
+המערכת קוראת קבוצות טלגרם שבחרת, שולפת סימולי מניות, ומודדת מה קרה אחרי יום / 5 / 20 ימי מסחר.
+נשמרים רק: סימול, מחיר שנאמר, שם הקבוצה, זמן. בלי תוכן הודעות ובלי פרטי חברי הקבוצה. המערכת אף פעם לא כותבת.
+
+1. היכנס ל-https://my.telegram.org ← API development tools ← צור אפליקציה. תקבל `api_id` ו-`api_hash`.
+2. בשרת: `nano ~/polymarket-intel/.env` והוסף בסוף (בלי לשלוח את הערכים לאף אחד):
+   ```
+   TG_API_ID=12345678
+   TG_API_HASH=abcdef...
+   ```
+3. התחברות חד-פעמית (טלגרם ישלח לך קוד):
+   ```
+   cd ~/polymarket-intel && sudo docker compose build tips && sudo docker compose run --rm tips python -m pmintel.tips_telegram --login
+   ```
+4. רשימת הקבוצות שלך: `sudo docker compose run --rm tips python -m pmintel.tips_telegram --list-chats`
+5. הוסף ל-`.env` את הקבוצות (שמות או מספרים, מופרדים בפסיק): `TG_CHATS=-1001234567890,שם קבוצה`
+6. ייבוא 30 הימים האחרונים והפעלה:
+   ```
+   sudo docker compose run --rm tips python -m pmintel.tips_telegram --history 30
+   sudo docker compose up -d tips
+   ```
+ניתוק בכל רגע: טלגרם ← הגדרות ← מכשירים ← סיים את ה-session.

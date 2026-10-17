@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -332,3 +333,34 @@ def check_stock(symbol: str, isin: str | None = Query(None, max_length=12)):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"price data unavailable: {type(e).__name__}") from None
     return {"symbol": sym, "source": "Yahoo Finance daily bars (1y)", **stockcheck.assess(bars, meta, isin)}
+
+
+class TipIn(BaseModel):
+    symbol: str = Field(min_length=1, max_length=10)
+    source: str = Field(min_length=1, max_length=80)
+    price: float | None = Field(None, gt=0, lt=100000)
+
+
+@app.get("/api/tips")
+def tips_overview():
+    from . import tips as T
+    with db.connect() as c:  # tuple rows (the pool returns dicts)
+        board = T.leaderboard(c)
+    recent = q("""SELECT id, source, kind, ts, symbol, mentioned_price, verdict, flags, entry_day, entry_price,
+                         r1, r5, r20, max_drawdown_20, max_runup_20 FROM tips ORDER BY ts DESC LIMIT 100""")
+    return {"leaderboard": board, "recent": recent,
+            "rule": "כניסה בפתיחה הראשונה אחרי הטיפ; תשואה בסגירה אחרי 1/5/20 ימי מסחר; בלי עמלות"}
+
+
+@app.post("/api/tips", status_code=201)
+def tips_add(tip: TipIn):
+    """Manually log a tip (e.g. from WhatsApp). JSON body only (forces a CORS preflight)."""
+    from . import stockcheck, tips as T
+    sym = tip.symbol.strip().upper()
+    if not stockcheck.SYMBOL_RE.match(sym):
+        raise HTTPException(400, "invalid symbol")
+    with db.connect() as c:
+        tid = T.record(c, "ידני: " + tip.source.strip(), sym, T.utcnow(), tip.price, kind="manual")
+    if tid is None:
+        raise HTTPException(409, "already logged in the last 24 h")
+    return {"id": tid}

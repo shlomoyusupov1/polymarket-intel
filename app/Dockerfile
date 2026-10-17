@@ -4,6 +4,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY pmintel ./pmintel
-RUN useradd -r -u 10001 app
+RUN useradd -r -u 10001 app && mkdir -p /data && chown app /data && chmod 700 /data
 USER app
 CMD ["python", "-m", "pmintel.collector"]

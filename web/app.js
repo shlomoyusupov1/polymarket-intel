@@ -101,6 +101,7 @@ const ROUTES = [
   { id: "watchlist", path: "#/watchlist", label: "רשימת מעקב", short: "מעקב", icon: "star", nav: "both" },
   { id: "research", path: "#/research", label: "מעבדת מחקר", icon: "lab", nav: "side" },
   { id: "check", path: "#/check", label: "בודק מניות חשודות", icon: "shield", nav: "side" },
+  { id: "tips", path: "#/tips", label: "מעקב טיפים", icon: "radar", nav: "side" },
   { id: "etf", path: "#/etf", label: "חדר מסחר ETF (נייר)", icon: "wallet", nav: "side" },
   { id: "portfolio", path: "#/portfolio", label: "תיק נייר", icon: "wallet", nav: "side", soon: true },
   { id: "alerts", path: "#/alerts", label: "התראות", icon: "bell", nav: "side", soon: true },
@@ -126,7 +127,7 @@ function route() {
   else if (mc) { id = "check"; arg = decodeURIComponent(mc[1]); }
   else { const r = ROUTES.find((x) => x.path === hash); if (r) id = r.id; }
   current = id;
-  const navId = id === "detail" ? "markets" : (["research", "check", "etf", "portfolio", "alerts", "system"].includes(id) && innerWidth < 960 ? "more" : id);
+  const navId = id === "detail" ? "markets" : (["research", "check", "tips", "etf", "portfolio", "alerts", "system"].includes(id) && innerWidth < 960 ? "more" : id);
   document.querySelectorAll("[data-route]").forEach((a) => a.toggleAttribute("aria-current", false));
   document.querySelectorAll(`[data-route="${navId}"], #side-nav [data-route="${id === "detail" ? "markets" : id}"]`)
     .forEach((a) => a.setAttribute("aria-current", "page"));
@@ -557,6 +558,43 @@ PAGES.check = async (view, sym) => {
       h("li", null, "מבקשים צילום מסך של ההוראה או של הביצוע."),
       h("li", null, "מניה קטנה, לרוב רשומה באיים (קיימן, BVI), עם מחזור זעיר."),
       h("li", null, "\"עמלה מהרווחים\" שתשלם להם בהמשך."))));
+};
+
+// ---- Tip tracker ----
+const pctCell = (v) => v == null ? h("span", { class: "faint" }, "—") : ltr(pct(v, 1), v >= 0 ? "up" : "down");
+const VBADGE = { red: ["bad", "אדום"], yellow: ["wait", "צהוב"], green: ["ok", "ירוק"], unknown: ["info", "?"] };
+PAGES.tips = async (view) => {
+  const d = await api("/api/tips");
+  if (current !== "tips") return;
+  const sym = h("input", { type: "search", placeholder: "סימול", "aria-label": "סימול", dir: "ltr", autocomplete: "off", required: true });
+  const src = h("input", { type: "search", placeholder: "מקור (למשל: וואטסאפ הילה)", "aria-label": "מקור", autocomplete: "off", required: true });
+  const price = h("input", { type: "number", step: "any", min: "0", placeholder: "מחיר שנאמר (לא חובה)", "aria-label": "מחיר", dir: "ltr" });
+  const msg = h("div", { class: "faint", role: "status" });
+  const form = h("form", { class: "toolbar", onsubmit: async (e) => {
+    e.preventDefault();
+    const body = { symbol: sym.value.trim(), source: src.value.trim() };
+    if (price.value) body.price = Number(price.value);
+    const r = await fetch("/api/tips", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
+    if (r.status === 201) { msg.textContent = "נרשם. התוצאה תימדד אוטומטית."; setTimeout(route, 600); }
+    else msg.textContent = r.status === 409 ? "הטיפ הזה כבר נרשם ב-24 השעות האחרונות." : `שגיאה (${r.status})`;
+  } }, h("div", { class: "search" }, sym), h("div", { class: "search" }, src), h("div", { class: "search" }, price),
+    h("button", { type: "submit", class: "btn primary" }, "רשום טיפ"));
+  const table = (head, rows, none) => rows.length ? h("div", { class: "scroll-x" }, h("table", { class: "t" },
+    h("thead", null, h("tr", null, head.map((x) => h("th", null, x)))), h("tbody", null, rows))) : empty(none);
+  const board = d.leaderboard.map((r) => h("tr", null, h("td", null, r.source), h("td", null, ltr(String(r.tips))),
+    h("td", null, ltr(String(r.measured_5d))), h("td", null, pctCell(r.avg_r5)), h("td", null, r.win_rate_5d == null ? "—" : ltr(pct(r.win_rate_5d, 0))),
+    h("td", null, pctCell(r.avg_r20)), h("td", null, pctCell(r.worst_drawdown_20)), h("td", null, r.red_share == null ? "—" : ltr(pct(r.red_share, 0)))));
+  const recent = d.recent.map((t) => { const [c, l] = VBADGE[t.verdict] || ["info", "—"]; return h("tr", null,
+    h("td", null, new Date(t.ts).toLocaleString("he-IL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })),
+    h("td", null, t.source), h("td", null, h("a", { href: "#/check/" + encodeURIComponent(t.symbol) }, ltr(t.symbol))),
+    h("td", null, h("span", { class: "badge " + c }, l)), h("td", null, t.entry_price == null ? "—" : ltr("$" + t.entry_price.toFixed(2))),
+    h("td", null, pctCell(t.r1)), h("td", null, pctCell(t.r5)), h("td", null, pctCell(t.r20)), h("td", null, pctCell(t.max_drawdown_20))); });
+  view.replaceChildren(h("div", { class: "stack" },
+    card("רישום טיפ ידני", "קיבלת המלצה בוואטסאפ? תרשום אותה כאן — המערכת תמדוד מה קרה אחרי", form, msg),
+    card("דירוג מקורות", d.rule, table(["מקור", "טיפים", "נמדדו (5 ימים)", "ממוצע 5 ימים", "הצליחו", "ממוצע 20 יום", "הירידה הגרועה", "אדומים"], board,
+      "עוד אין טיפים. רשום ידנית, או חבר את טלגרם (הוראות ב-README).")),
+    card("טיפים אחרונים", "לחיצה על סימול פותחת את בודק המניות", table(["זמן", "מקור", "סימול", "סיכון", "כניסה", "יום", "5 ימים", "20 יום", "ירידה מקס׳"], recent, "—")),
+    h("p", { class: "faint" }, "נמדד בלי עמלות ובלי החלקה — בפועל התוצאה הייתה גרועה יותר, במיוחד במניות OTC. אין כאן המלצה לקנות דבר.")));
 };
 
 // ---- ETF paper study v2 ----
