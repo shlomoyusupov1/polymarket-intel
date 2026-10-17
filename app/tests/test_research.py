@@ -65,3 +65,26 @@ def test_month_windows_cover_range_without_gaps():
     assert w[0] == (date(2024, 11, 15), date(2024, 12, 1))
     assert w[-1] == (date(2025, 2, 1), date(2025, 3, 1))
     assert all(a[1] == b[0] for a, b in zip(w, w[1:])) and len(w) == 4
+
+
+def test_history_fetch_survives_400_and_falls_back():
+    from datetime import datetime, timezone
+    import httpx
+    from pmintel.backfill import fetch_history
+    from pmintel.http import ApiClient
+    from pmintel.sources import Clob
+    seen = []
+
+    def handler(req):
+        p = req.url.params
+        seen.append((p.get("interval"), p.get("fidelity")))
+        if p.get("interval") == "max" or p.get("fidelity") == "360":
+            return httpx.Response(400, json={"error": "bad request"})
+        return httpx.Response(200, json={"history": [{"t": 1700000000, "p": 0.4}]})
+    clob = Clob(ApiClient("https://x", client=httpx.Client(transport=httpx.MockTransport(handler)),
+                          sleep=lambda s: None, min_interval=0))
+    a, b = datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 2, 1, tzinfo=timezone.utc)
+    assert len(fetch_history(clob, "tok", 360, a, b)) == 1 and seen[-1] == (None, "1440")
+    always400 = Clob(ApiClient("https://x", client=httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(400))), sleep=lambda s: None, min_interval=0))
+    assert fetch_history(always400, "tok", 360, a, b) is None

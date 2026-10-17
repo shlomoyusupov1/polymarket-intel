@@ -41,13 +41,34 @@ def iter_closed(gamma: Gamma, since: str, min_volume: float):
             yield from gamma.iter_markets(**base)
 
 
+def fetch_history(clob: Clob, token_id: str, fidelity: int, start, closed):
+    """Production 2026-10-16: some tokens answer 400 for interval=max. Try max, then the market's
+    own [start, close] window, then daily fidelity. None = rejected every time (never fatal)."""
+    attempts = [(fidelity, None, None)]
+    if start and closed:
+        attempts += [(fidelity, start, closed), (1440, start, closed)]
+    got_empty = False
+    for fid, a, b in attempts:
+        try:
+            pts = clob.price_history(token_id, fid, a, b)
+        except httpx.HTTPStatusError as e:
+            if 400 <= e.response.status_code < 500:
+                continue
+            raise
+        if pts:
+            return pts
+        got_empty = True
+    return [] if got_empty else None
+
+
 def backfill(conn, gamma: Gamma, clob: Clob, since: str, min_volume: float, fidelity: int,
-             limit: int | None = None, with_history: bool = True) -> dict:
-    stats = {"seen": 0, "resolved": 0, "history_fetched": 0, "history_points": 0, "history_empty": 0}
+             limit: int | None = None, with_history: bool = True, discover: bool = True) -> dict:
+    stats = {"seen": 0, "resolved": 0, "history_fetched": 0, "history_points": 0, "history_empty": 0,
+             "history_error": 0}
     with db.job_run(conn, "backfill") as run:
         batch: dict[str, dict] = {}
         seen_ids: set[str] = set()
-        for raw in iter_closed(gamma, since, min_volume):
+        for raw in (iter_closed(gamma, since, min_volume) if discover else ()):
             if "id" not in raw or str(raw["id"]) in seen_ids:
                 continue
             seen_ids.add(str(raw["id"]))
@@ -78,9 +99,10 @@ def backfill(conn, gamma: Gamma, clob: Clob, since: str, min_volume: float, fide
             for i, (market_id, token_id, start, closed) in enumerate(rows):
                 if limit and i >= limit:
                     break
-                pts = clob.price_history(token_id, fidelity)
-                if not pts and start and closed:
-                    pts = clob.price_history(token_id, fidelity, start, closed)
+                pts = fetch_history(clob, token_id, fidelity, start, closed)
+                if pts is None:  # every variant rejected by the CLOB: record and move on
+                    stats["history_error"] += 1
+                    continue
                 stats["history_fetched"] += 1
                 if not pts:
                     stats["history_empty"] += 1
@@ -100,10 +122,12 @@ def main() -> None:
     p.add_argument("--fidelity", type=int, default=config.BACKFILL_FIDELITY_MIN)
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--no-history", action="store_true")
+    p.add_argument("--history-only", action="store_true", help="skip market discovery (already stored)")
     a = p.parse_args()
     conn = db.connect()
     db.init_schema(conn)
-    backfill(conn, Gamma(), Clob(), a.since, a.min_volume, a.fidelity, a.limit, not a.no_history)
+    backfill(conn, Gamma(), Clob(), a.since, a.min_volume, a.fidelity, a.limit, not a.no_history,
+             discover=not a.history_only)
 
 
 if __name__ == "__main__":
