@@ -251,3 +251,7 @@ ALTER TABLE price_history ADD COLUMN IF NOT EXISTS source text;
 ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS detail jsonb;
 ALTER TABLE tips ADD COLUMN IF NOT EXISTS source_url text;
 ALTER TABLE sec_events ADD COLUMN IF NOT EXISTS url text;
+
+-- Per-tip round-trip cost estimate (pmintel/costs.py: Corwin-Schultz spread from daily high/low + fees)
+ALTER TABLE tips ADD COLUMN IF NOT EXISTS cost_rt double precision;
+ALTER TABLE tips ADD COLUMN IF NOT EXISTS cost_src text;

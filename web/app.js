@@ -105,6 +105,8 @@ const ROUTES = [
     lead: "כל מקור טיפים נמדד מול SPY. מקור מקבל \"אמין\" רק אחרי 50 טיפים ו-60% הצלחה שאינה מקרית." },
   { id: "etf", path: "#/etf", label: "חדר מסחר", short: "מסחר", icon: "wallet", primary: true,
     lead: "שתי אסטרטגיות על קרנות סל, בכסף מדומה, מול פשוט להחזיק את SPY. הכללים נקבעו מראש." },
+  { id: "lab", path: "#/lab", label: "מעבדה", short: "מעבדה", icon: "lab", primary: true,
+    lead: "אסטרטגיות מסחר שנבדקות על 10 שנות נתונים: הכללים נקבעים מראש, נבחרים על השנים הקודמות ונבחנים על שנה שהם לא ראו." },
   { id: "pm", path: "#/pm", label: "Polymarket", short: "Polymarket", icon: "list", primary: true, bottom: true,
     lead: "מה זה Polymarket, איך מרוויחים ומפסידים בו, ומה המערכת שלנו בודקת לפני שהיא אומרת משהו." },
   { id: "pmoverview", path: "#/pm/overview", label: "סקירה", section: "pm", lead: "מה זז, מה מושך כסף, והאם יש הזדמנות שנתמכת בנתונים." },
@@ -676,7 +678,11 @@ PAGES.tips = async (view) => {
     h("thead", null, h("tr", null, head.map((x) => h("th", null, x)))), h("tbody", null, rows))) : empty(none);
   const GATE = { reliable: ["ok", "אמין"], promising: ["wait", "מבטיח — עוד לא מוכח"], not_reliable: ["bad", "לא אמין"], collecting: ["", "צובר נתונים"] };
   const gateCell = (g) => { if (!g) return "—"; const [c, l] = GATE[g.status] || ["", g.status];
-    return h("div", null, h("span", { class: "badge " + c }, l), g.n ? h("div", { class: "faint" }, ltr(`${pct(g.success_rate, 0)} (≥${pct(g.success_lo95, 0)}) · n=${g.n}`)) : null); };
+    return h("div", null, h("span", { class: "badge " + c }, l),
+      g.n ? h("div", { class: "faint" }, ltr(`${pct(g.success_rate, 0)} · n=${g.n}`)) : null,
+      g.n ? h("div", { class: "faint" }, "רווח ממוצע אחרי עלות ", ltr(pct(g.edge_after_cost, 1), g.edge_after_cost >= 0 ? "up" : "down"),
+        g.avg_cost != null ? h("span", null, " · עלות ", ltr(pct(g.avg_cost, 1))) : null) : null,
+      g.downgraded ? h("div", { class: "faint" }, `ירד ל"מבטיח": נבדקו ${g.sources_tested} מקורות, והתוצאה יכולה להיות מזל`) : null); };
   const board = d.leaderboard.map((r) => h("tr", null, h("td", null, r.source), h("td", null, gateCell(r.gate)), h("td", null, ltr(String(r.tips))),
     h("td", null, ltr(String(r.measured_5d))), h("td", null, pctCell(r.median_r5)), h("td", null, r.win_rate_5d == null ? "—" : ltr(pct(r.win_rate_5d, 0))),
     h("td", null, pctCell(r.excess_r5)), h("td", null, r.beat_spy_5d == null ? "—" : ltr(pct(r.beat_spy_5d, 0))),
@@ -688,10 +694,10 @@ PAGES.tips = async (view) => {
     h("td", null, pctCell(t.r1)), h("td", null, pctCell(t.r5)), h("td", null, pctCell(t.r20)), h("td", null, pctCell(t.max_drawdown_20))); });
   view.replaceChildren(h("div", { class: "stack" },
     card("רישום טיפ ידני", "קיבלת המלצה בוואטסאפ? תרשום אותה כאן — המערכת תמדוד מה קרה אחרי", form, msg),
-    card("דירוג מקורות", d.rule + ". \"אמין\" = לפחות 50 טיפים, 60% ניצחו את SPY, והתוצאה לא מקרית (גבול תחתון מעל 50%)", table(["מקור", "אמינות (ניצח SPY אחרי עלויות)", "טיפים", "נמדדו (5 ימים)", "חציון 5 ימים", "הרוויחו", "מול SPY (5 ימים)", "ניצחו את SPY", "ממוצע 20 יום", "הירידה הגרועה", "אדומים"], board,
+    card("דירוג מקורות", d.rule + ". \"אמין\" = לפחות 50 טיפים, 60% ניצחו את SPY, רווח ממוצע חיובי אחרי עלויות, והתוצאה לא מקרית גם אחרי תיקון למספר המקורות שנבדקו", table(["מקור", "אמינות (ניצח SPY אחרי עלויות)", "טיפים", "נמדדו (5 ימים)", "חציון 5 ימים", "הרוויחו", "מול SPY (5 ימים)", "ניצחו את SPY", "ממוצע 20 יום", "הירידה הגרועה", "אדומים"], board,
       "עוד אין טיפים. רשום ידנית, או חבר את טלגרם (הוראות ב-README).")),
     card("טיפים אחרונים", "לחיצה על סימול פותחת את בודק המניות", table(["זמן", "מקור", "סימול", "סיכון", "כניסה", "יום", "5 ימים", "20 יום", "ירידה מקס׳"], recent, "—")),
-    h("p", { class: "faint" }, "נמדד בלי עמלות ובלי החלקה — בפועל התוצאה הייתה גרועה יותר, במיוחד במניות OTC. אין כאן המלצה לקנות דבר.")));
+    h("p", { class: "faint" }, "עמודות התשואה בטבלאות הן לפני עלויות. עמודת האמינות כבר מורידה לכל מניה את עלות המסחר המשוערת שלה — במניות זולות זה יכול להגיע לכמה אחוזים לעסקה. אין כאן המלצה לקנות דבר.")));
 };
 
 // ---- ETF paper study v2 ----
@@ -866,6 +872,58 @@ function plainMarket(m) {
     h("span", { class: "faint" }, "זו הערכת המשתתפים, לא תחזית שבדקנו."));
 }
 
+// ---- Strategy lab ----
+PAGES.lab = async (view) => {
+  const d = await api("/api/lab/latest").catch(() => null);
+  if (current !== "lab") return;
+  if (!d) { view.replaceChildren(card("המעבדה עוד לא רצה", "הריצה הראשונה מורידה 10 שנות מחירים ל-65 מניות ובודקת 5 אסטרטגיות. זה לוקח כמה דקות.",
+    h("pre", { class: "code", dir: "ltr" }, "sudo docker compose run --rm stocklab"))); return; }
+  const r = d.result, S = r.strategies;
+  const V = { candidate_for_paper: ["ok", "מועמדת למעקב בכסף מדומה"], edge_below_target: ["wait", "יש יתרון, מתחת ל-60%"],
+    not_supported: ["bad", "לא עובדת"], insufficient_data: ["", "מעט מדי עסקאות"] };
+  const ORDER = { candidate_for_paper: 0, edge_below_target: 1, not_supported: 2, insufficient_data: 3 };
+  const list = Object.entries(S).sort((a, b) => (ORDER[a[1].verdict] - ORDER[b[1].verdict]) || ((b[1].edge_vs_baseline ?? -9) - (a[1].edge_vs_baseline ?? -9)));
+  const winners = list.filter(([, v]) => v.verdict === "candidate_for_paper");
+  const edge = list.filter(([, v]) => v.verdict === "edge_below_target");
+  const signed = (v, d = 2) => { if (v == null) return "—"; const r = Number((v * 100).toFixed(d)) || 0;
+    return ltr((r > 0 ? "+" : "") + r.toFixed(d) + "%", r > 0 ? "up" : r < 0 ? "down" : ""); };
+  const head = winners.length
+    ? h("section", { class: "verdict go" }, h("h2", null, winners.length === 1 ? "אסטרטגיה אחת עברה את הבדיקה על נתוני העבר" : `${winners.length} אסטרטגיות עברו את הבדיקה על נתוני העבר`),
+        h("p", null, "השלב הבא: מעקב קדימה בכסף מדומה. בדיקה על העבר לבדה לא מספיקה כדי לסמוך עליהן."))
+    : h("section", { class: "verdict" }, h("h2", null, edge.length ? "יש יתרון קטן, אבל אף אסטרטגיה לא מגיעה ל-60%." : "אף אסטרטגיה לא עברה את הבדיקה."),
+        h("p", null, "זו תוצאה אמיתית, לא כישלון של המערכת: רוב הכללים הפשוטים לא מנצחים את השוק אחרי עלויות. ממשיכים לבדוק רעיונות חדשים באותה שיטה."));
+  const cardFor = ([k, v]) => { const [c, l] = V[v.verdict] || ["", v.verdict];
+    const years = Object.entries(v.by_year || {});
+    return h("section", { class: "card" },
+      h("div", { class: "row-between" }, h("h3", null, v.label), h("span", { class: "badge " + c }, l)),
+      h("p", { class: "faint" }, v.rule),
+      h("div", { class: "kv" },
+        h("div", null, h("div", { class: "k" }, "עסקאות מחוץ למדגם"), h("div", { class: "v" }, ltr(String(v.n)))),
+        h("div", null, h("div", { class: "k" }, "ניצחו את SPY אחרי עלות"), h("div", { class: "v" }, v.success_rate == null ? "—" : ltr(pct(v.success_rate, 0)))),
+        h("div", null, h("div", { class: "k" }, "יתרון לעסקה מעל קנייה אקראית"), h("div", { class: "v" }, signed(v.edge_vs_baseline))),
+        h("div", null, h("div", { class: "k" }, "גבול תחתון (95%)"), h("div", { class: "v" }, signed(v.edge_lo95))),
+        h("div", null, h("div", { class: "k" }, "רווח ממוצע / הפסד ממוצע"), h("div", { class: "v" }, h("span", null, signed(v.avg_win, 1), " / ", signed(v.avg_loss, 1)))),
+        h("div", null, h("div", { class: "k" }, "עלות ממוצעת לעסקה"), h("div", { class: "v" }, v.avg_cost == null ? "—" : ltr(pct(v.avg_cost, 2))))),
+      years.length ? h("div", { class: "years", "aria-label": "יתרון לפי שנה" }, years.map(([y, x]) => h("span", { class: "yr " + (x.edge_vs_baseline >= 0 ? "up" : "down"), title: `${x.n} עסקאות` },
+        ltr(y), " ", signed(x.edge_vs_baseline, 1)))) : null,
+      v.verdict === "not_supported" && v.edge_lo95 > 0 ? h("p", { class: "faint" }, "הגבול התחתון חיובי, אבל התוצאה לא שורדת את התיקון לכך שנבדקו כמה אסטרטגיות — יכול להיות מזל.") : null,
+      v.current_params ? h("p", { class: "faint" }, "הגדרות שנבחרו לשנה האחרונה: ", ltr(Object.entries(v.current_params.params).map(([a, b]) => `${a}=${b}`).join(", ")), `, החזקה ${v.current_params.hold} ימי מסחר`) : null,
+      v.signals_today && v.signals_today.length ? h("p", null, "איתות ביום האחרון: ", v.signals_today.map((x, i) => [i ? ", " : "", h("a", { href: "#/check/" + x }, ltr(x))]),
+        h("span", { class: "faint" }, v.verdict === "candidate_for_paper" ? " · נכנס למעקב" : " · לא לפעולה — האסטרטגיה לא הוכחה")) : null); };
+  view.replaceChildren(h("div", { class: "stack" }, head,
+    ...list.map(cardFor),
+    card("איך נבדק", `${r.universe.length} מניות גדולות ונזילות, ${r.first_day} עד ${r.last_day}, מול ${r.benchmark}`,
+      h("ul", { class: "clean" },
+        h("li", null, "קונים בפתיחה של היום שאחרי האיתות, ומוכרים בסגירה אחרי 5, 10 או 20 ימי מסחר."),
+        h("li", null, "לכל עסקה יורדת עלות מסחר משוערת של אותה מניה: מרווח קנייה-מכירה לפי טווח המחירים היומי, ועוד 0.1% עמלות."),
+        h("li", null, "ההגדרות נבחרות רק על השנים הקודמות ונבחנות על השנה הבאה. שלוש השנים הראשונות משמשות ללמידה בלבד."),
+        h("li", null, "רשימת המניות היא החברות הגדולות של היום, כלומר כאלה ששרדו. לכן כל קנייה בהן נראית טוב בדיעבד. כדי לנטרל את זה, כל אסטרטגיה צריכה לנצח קנייה אקראית של אותן מניות באותה שנה."),
+        h("li", null, "כשבודקים כמה אסטרטגיות, אחת יכולה להצליח במזל. התוצאות מתוקנות לזה (Holm)."),
+        h("li", null, "גם אסטרטגיה שעוברת הכול היא רק מועמדת: היא חייבת להוכיח את עצמה קדימה, בכסף מדומה.")),
+      r.missing && r.missing.length ? h("p", { class: "faint" }, "חסרים נתונים: ", ltr(r.missing.join(", "))) : null),
+    h("p", { class: "faint" }, "עודכן ", new Date(d.created_at).toLocaleString("he-IL"), ". אין כאן המלצה לקנות דבר.")));
+};
+
 // ---- Coming soon (honest) ----
 PAGES.portfolio = (view) => view.replaceChildren(card("תיק נייר", "עוד לא פעיל",
   h("p", { class: "sub" }, "יופעל רק לאסטרטגיה שעברה את המחקר ההיסטורי. כל עסקת נייר תתועד במחיר ביצוע אמיתי מספר הפקודות, עם עלויות."),
@@ -874,7 +932,7 @@ PAGES.alerts = (view) => view.replaceChildren(card("התראות", "עוד לא 
   h("p", { class: "sub" }, "מתוכנן: תזוזה חריגה בשוק ממעקב, הזדמנות מבנית בת-ביצוע, ותקלה בסריקה. ערוץ: טלגרם."),
   h("p", { class: "faint" }, "אין התראות מזויפות — המסך הזה יתמלא רק כשיהיה מנגנון אמיתי מאחוריו.")));
 PAGES.more = (view) => view.replaceChildren(h("div", { class: "stack" },
-  ["check", "etf", "pmoverview", "markets", "research", "system"].map((id) => { const r = ROUTES.find((x) => x.id === id);
+  ["check", "lab", "etf", "pmoverview", "markets", "research", "system"].map((id) => { const r = ROUTES.find((x) => x.id === id);
     return h("a", { class: "reason", href: r.path }, h("div", { class: "v" }, r.label), h("div", { class: "d" }, r.lead)); })));
 
 // ---- System Health ----

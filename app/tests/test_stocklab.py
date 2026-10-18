@@ -1,0 +1,85 @@
+import random
+from datetime import date, timedelta
+
+from pmintel import stocklab as L
+
+
+def days(n, start=date(2015, 1, 2)):
+    out, d = [], start
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d.isoformat())
+        d += timedelta(days=1)
+    return out
+
+
+def walk(seed, n, drift=0.0003, vol=0.015, plant=None):
+    """Random walk bars. plant(i, closes) may return a jump applied from the next day's open."""
+    rnd = random.Random(seed)
+    D = days(n)
+    c, bars, pend = 50.0, [], {}
+    for i, d in enumerate(D):
+        o = c * (1 + rnd.gauss(0, 0.002))
+        c = o * (1 + drift + pend.pop(i, 0.0) + rnd.gauss(0, vol))
+        h, l = max(o, c) * 1.004, min(o, c) * 0.996
+        bars.append({"day": d, "o": o, "h": h, "l": l, "c": c, "dv": 5e8 * (1 + rnd.random())})
+        if plant and plant(i, [b["c"] for b in bars]):
+            pend[i + 2] = 0.03  # rises during the day after entry: tradable at the next open
+    return bars
+
+
+def test_signals_never_look_ahead():
+    b = walk(1, 600)
+    f = L.features(b)
+    for i in range(260, 590, 7):
+        cut = L.features(b[: i + 1])
+        for name, spec in L.STRATEGIES.items():
+            for p in spec["grid"]:
+                assert L.signal(name, f, i, p) == L.signal(name, cut, i, p), (name, p, i)
+
+
+def test_random_market_finds_nothing():
+    spy = walk(0, 1800)
+    feats = {f"S{k}": L.features(walk(100 + k, 1800)) for k in range(12)}
+    for name in L.STRATEGIES:
+        wf = L.walk_forward(name, feats, spy)
+        s = L.summarize(wf["oos"])
+        s["p_holm"] = s["p_edge"]
+        assert L.verdict(s) in ("insufficient_data", "not_supported"), (name, s["edge_lo95"])
+
+
+def test_planted_pullback_edge_is_found_out_of_sample():
+    def plant(i, c):  # after a 3-day drop of 4%+, the stock rises 3% the day after entry
+        return i >= 4 and c[-1] / c[-4] - 1 <= -0.04
+    spy = walk(0, 1800)
+    feats = {f"S{k}": L.features(walk(200 + k, 1800, vol=0.02, plant=plant)) for k in range(15)}
+    wf = L.walk_forward("rsi2_pullback", feats, spy)
+    s = L.summarize(wf["oos"])
+    assert s["n"] >= 50 and s["edge_lo95"] > 0 and s["edge_vs_baseline"] > 0.005
+    assert set(wf["choices"]) and all(int(y) >= 2018 for y in wf["choices"])  # first 3 years train only
+
+
+def test_costs_baseline_and_holm():
+    flat = [{"day": d, "o": 10, "h": 10.2, "l": 9.8, "c": 10, "dv": 1e6} for d in days(40)]
+    assert abs(L.features(flat)["cost"][30] - (0.04 + L.costs.FEE_RT)) < 0.002
+    h = L.holm({"a": 0.01, "b": 0.04, "c": None})
+    assert h == {"a": 0.02, "b": 0.04, "c": None}
+    m, se = L.clustered_mean([1.0, 1.0, -1.0, -1.0], ["w1", "w1", "w2", "w2"])
+    assert m == 0 and se > 0.9  # same-week trades move together -> wide CI
+
+
+def test_fetch_adjusts_splits(monkeypatch):
+    class R:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return {"chart": {"result": [{"meta": {"exchangeTimezoneName": "America/New_York"},
+                    "timestamp": [1700000000, 1700086400],
+                    "indicators": {"quote": [{"open": [400, 101], "high": [410, 103], "low": [390, 99],
+                                              "close": [404, 102], "volume": [10, 40]}],
+                                   "adjclose": [{"adjclose": [101, 102]}]}}]}}
+    class C:
+        def get(self, url, params=None): return R()
+    b = L.fetch("X", client=C())
+    assert abs(b[0]["c"] - 101) < 1e-9 and abs(b[0]["o"] - 100) < 1e-9  # 4:1 split removed
+    assert b[0]["dv"] == 404 * 10 and b[1]["dv"] == 102 * 40

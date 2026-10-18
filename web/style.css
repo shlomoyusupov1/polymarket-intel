@@ -215,3 +215,13 @@ ul.clean li { margin: 4px 0; }
 .answer { font: 900 34px/1.1 var(--serif); color: var(--ink); }
 .section-title { font-size: 14px; color: var(--faint); margin: 6px 0 8px; }
 .reliab { width: 100%; max-width: 420px; height: auto; }
+
+/* strategy lab */
+.row-between { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 20px; margin: 14px 0 6px; }
+.kv .k { color: var(--muted); font-size: 13px; }
+.kv .v { font-size: 20px; font-weight: 500; color: var(--ink); }
+.years { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.yr { font-size: 12.5px; padding: 3px 8px; border-radius: 8px; background: var(--sunk); }
+.yr.up { background: var(--up-bg); } .yr.down { background: var(--down-bg); }
+pre.code { background: var(--sunk); border-radius: var(--r-sm); padding: 12px 14px; overflow-x: auto; font-size: 13px; margin: 10px 0 0; }

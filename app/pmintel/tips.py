@@ -16,7 +16,7 @@ import re
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 
-from . import stockcheck
+from . import costs, stockcheck
 
 log = logging.getLogger("tips")
 NY = ZoneInfo("America/New_York")
@@ -99,6 +99,8 @@ def outcome(bars: list[dict], tip_ts: datetime) -> dict | None:
     if entry <= 0:
         return None
     out = {"entry_day": after[0]["day"], "entry": entry, "sessions": len(after[:20])}
+    before = [b for b in bars if b["day"] < after[0]["day"] and "h" in b and "l" in b]
+    out["cost_rt"], out["cost_src"] = costs.round_trip(before) if before else (costs.fallback(entry), "price_tier")
     for n, key in ((1, "r1"), (5, "r5"), (20, "r20")):
         out[key] = float(after[n - 1]["c"]) / entry - 1 if len(after) >= n else None
     win = after[:20]
@@ -119,7 +121,8 @@ def spy_window(spy: list[dict], entry_day: str) -> dict:
 def update_outcomes(conn, fetch=stockcheck.fetch) -> int:
     """Fill or refresh outcomes (and the same-window SPY benchmark) for recent or incomplete tips."""
     rows = conn.execute("""SELECT id, symbol, ts FROM tips
-                           WHERE (r20 IS NULL OR spy_r20 IS NULL) AND ts > now() - interval '60 days'
+                           WHERE ((r20 IS NULL OR spy_r20 IS NULL) AND ts > now() - interval '60 days')
+                              OR (cost_rt IS NULL AND r5 IS NOT NULL AND ts > now() - interval '300 days')
                            ORDER BY symbol""").fetchall()
     cache: dict[str, list] = {}
     try:
@@ -141,9 +144,9 @@ def update_outcomes(conn, fetch=stockcheck.fetch) -> int:
         b = spy_window(spy, o["entry_day"]) if spy else {"spy_r1": None, "spy_r5": None, "spy_r20": None}
         conn.execute("""UPDATE tips SET entry_day = %s, entry_price = %s, r1 = %s, r5 = %s, r20 = %s,
                         max_drawdown_20 = %s, max_runup_20 = %s, spy_r1 = %s, spy_r5 = %s, spy_r20 = %s,
-                        outcome_at = now() WHERE id = %s""",
+                        cost_rt = %s, cost_src = %s, outcome_at = now() WHERE id = %s""",
                      (o["entry_day"], o["entry"], o["r1"], o["r5"], o["r20"], o["max_drawdown_20"],
-                      o["max_runup_20"], b["spy_r1"], b["spy_r5"], b["spy_r20"], tid))
+                      o["max_runup_20"], b["spy_r1"], b["spy_r5"], b["spy_r20"], o["cost_rt"], o["cost_src"], tid))
         n += 1
     return n
 
@@ -160,13 +163,17 @@ def leaderboard(conn) -> list[dict]:
                avg(CASE WHEN verdict = 'red' THEN 1.0 WHEN verdict IS NOT NULL THEN 0.0 END), max(ts)
         FROM tips GROUP BY source ORDER BY count(*) DESC""").fetchall()
     per_source: dict[str, list] = {}
-    for src, sym, r5, spy in conn.execute("SELECT source, symbol, r5, spy_r5 FROM tips").fetchall():
-        per_source.setdefault(src, []).append((sym, r5, spy))
-    return [{**dict(zip(cols, r)), "gate": source_gate(per_source.get(r[0], []))} for r in rows]
+    for src, sym, r5, spy, cost, price in conn.execute(
+            "SELECT source, symbol, r5, spy_r5, cost_rt, entry_price FROM tips").fetchall():
+        per_source.setdefault(src, []).append((sym, r5, spy, cost, price))
+    gates = apply_holm({r[0]: source_gate(per_source.get(r[0], [])) for r in rows})
+    return [{**dict(zip(cols, r)), "gate": gates[r[0]]} for r in rows]
 
 
-ROUND_TRIP_COST = 0.002  # 0.2% per round trip; real OTC costs are higher
-GATE = {"min_n": 50, "win_rate": 0.60}
+ROUND_TRIP_COST = 0.002  # used only when neither a range-based estimate nor an entry price exists
+GATE = {"min_n": 50, "win_rate": 0.60, "alpha": 0.05}
+RULE = ("success = beat SPY over the same 5 trading days after the estimated round-trip cost of that stock "
+        "(bid-ask spread from daily high/low + fees)")
 
 
 def _wilson_lo(k: int, n: int, z: float = 1.96) -> float:
@@ -178,34 +185,77 @@ def _wilson_lo(k: int, n: int, z: float = 1.96) -> float:
     return max(0.0, (p + z * z / (2 * n) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / d)
 
 
+def _cost(row: tuple) -> float:
+    cost = row[3] if len(row) > 3 else None
+    if cost is not None:
+        return cost
+    price = row[4] if len(row) > 4 else None
+    return costs.fallback(price) if price is not None else ROUND_TRIP_COST
+
+
 def source_gate(rows: list[tuple]) -> dict:
-    """rows: (symbol, r5, spy_r5) for one source. 'Success' = beat SPY over the same 5 sessions
-    after a round-trip cost. 'reliable' needs >= 50 measured tips, >= 60% success whose 95% lower
-    bound is above 50% (not luck), and a positive average edge whose lower bound is above 0 when each
-    symbol counts once (so one hyped stock posted 20 times can't carry a source)."""
+    """rows: (symbol, r5, spy_r5[, cost_rt, entry_price]) for one source.
+
+    Success = beat SPY over the same 5 sessions after that stock's own round-trip cost. What decides
+    whether a source makes money is the average edge, not the hit rate (60% small wins and 40% big
+    losses lose money), so 'reliable' needs ALL of: >= 50 measured tips; >= 60% success with a 95%
+    Wilson lower bound above 50%; a positive average edge whose 95% lower bound is above 0 when each
+    symbol counts once (one hyped stock posted 20 times can't carry a source); and, applied across
+    all sources in apply_holm, an edge p-value that survives the Holm correction for testing many
+    sources (with enough groups one will look good by luck)."""
     import math
-    m = [(sym, r - s_ - ROUND_TRIP_COST) for sym, r, s_ in rows if r is not None and s_ is not None]
+    m = [(r[0], r[1] - r[2] - _cost(r), _cost(r)) for r in rows if r[1] is not None and r[2] is not None]
     n = len(m)
-    k = sum(1 for _, x in m if x > 0)
+    k = sum(1 for _, x, _c in m if x > 0)
     by_sym: dict[str, list[float]] = {}
-    for sym, x in m:
+    for sym, x, _c in m:
         by_sym.setdefault(sym, []).append(x)
     per = [sum(v) / len(v) for v in by_sym.values()]
     mean = sum(per) / len(per) if per else None
     se = (math.sqrt(sum((x - mean) ** 2 for x in per) / (len(per) - 1)) / math.sqrt(len(per))) if len(per) > 1 else None
+    if se is not None and se > 0:
+        p_edge = 0.5 * math.erfc((mean / se) / math.sqrt(2))
+    elif se == 0 and mean is not None:
+        p_edge = 0.0 if mean > 0 else 1.0
+    else:
+        p_edge = None
+    wins = [x for _, x, _c in m if x > 0]
+    losses = [x for _, x, _c in m if x <= 0]
     win = k / n if n else None
     lo = _wilson_lo(k, n)
+    passes = bool(n >= GATE["min_n"] and win >= GATE["win_rate"] and lo > 0.5 and se and mean - 1.96 * se > 0)
     if n < 30:
         status = "collecting"
-    elif n >= GATE["min_n"] and win >= GATE["win_rate"] and lo > 0.5 and se and mean - 1.96 * se > 0:
-        status = "reliable"
+    elif passes:
+        status = "reliable"  # may still be downgraded by apply_holm
     elif win >= 0.55 and mean and mean > 0:
         status = "promising"
     else:
         status = "not_reliable"
     return {"n": n, "symbols": len(per), "success_rate": win, "success_lo95": lo if n else None,
-            "edge_after_cost": mean, "edge_lo95": (mean - 1.96 * se) if se else None, "status": status,
-            "rule": "success = beat SPY over the same 5 trading days after 0.2% round-trip cost"}
+            "edge_after_cost": mean, "edge_lo95": (mean - 1.96 * se) if se else None,
+            "avg_win": sum(wins) / len(wins) if wins else None, "avg_loss": sum(losses) / len(losses) if losses else None,
+            "profit_factor": (sum(wins) / -sum(losses)) if losses and sum(losses) < 0 else None,
+            "avg_cost": sum(c for _, _x, c in m) / n if n else None,
+            "p_edge": p_edge, "status": status, "rule": RULE}
+
+
+def apply_holm(gates: dict[str, dict]) -> dict[str, dict]:
+    """Holm-Bonferroni across every source with >= 30 measured tips. A source stays 'reliable' only
+    if its edge p-value survives the correction; the number of sources tested is recorded."""
+    tested = sorted(((g["p_edge"], s) for s, g in gates.items() if g["n"] >= 30 and g["p_edge"] is not None))
+    m = len(tested)
+    running = 0.0
+    for i, (p, s) in enumerate(tested):
+        running = max(running, min(1.0, (m - i) * p))
+        gates[s]["p_holm"] = running
+    for s, g in gates.items():
+        g["sources_tested"] = m
+        g.setdefault("p_holm", None)
+        if g["status"] == "reliable" and not (g["p_holm"] is not None and g["p_holm"] < GATE["alpha"]):
+            g["status"] = "promising"
+            g["downgraded"] = "multiple_testing"
+    return gates
 
 
 def utcnow() -> datetime:
