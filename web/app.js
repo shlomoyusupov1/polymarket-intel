@@ -97,28 +97,33 @@ function starBtn(id) {
 const ROUTES = [
   { id: "home", path: "#/", label: "היום", short: "היום", icon: "home", primary: true, bottom: true,
     lead: "תשובה אחת: יש היום משהו שהנתונים תומכים בו? ולמה." },
-  { id: "evidence", path: "#/evidence", label: "המניות שלי", short: "מניות", icon: "lab", primary: true, bottom: true,
+  { id: "stocks", path: "#/stocks", label: "מניות", short: "מניות", icon: "lab", primary: true, bottom: true,
+    lead: "השוק והסקטורים, האיתותים של האסטרטגיות שבבדיקה, ודיווחים מהותיים. מחקר — לא המלצה." },
+  { id: "evidence", path: "#/evidence", label: "המניות שלי", section: "stocks",
     lead: "כל מה שידוע על המניות שאתה עוקב אחריהן: דיווחים רשמיים, טיפים, מחיר לפני ואחרי, ומה עוד לא ידוע." },
-  { id: "check", path: "#/check", label: "בדיקת מניה", short: "בדיקה", icon: "shield", primary: true,
+  { id: "check", path: "#/check", label: "בדיקת מניה", section: "stocks",
     lead: "קיבלת טיפ? הכנס סימול ותראה אם יש סימנים לניפוח מחיר לפני שאתה קונה." },
-  { id: "tips", path: "#/tips", label: "מקורות", short: "מקורות", icon: "radar", primary: true, bottom: true,
-    lead: "כל מקור טיפים נמדד מול SPY. מקור מקבל \"אמין\" רק אחרי 50 טיפים ו-60% הצלחה שאינה מקרית." },
-  { id: "etf", path: "#/etf", label: "חדר מסחר", short: "מסחר", icon: "wallet", primary: true,
-    lead: "שתי אסטרטגיות על קרנות סל, בכסף מדומה, מול פשוט להחזיק את SPY. הכללים נקבעו מראש." },
-  { id: "agents", path: "#/agents", label: "חדר הסוכנים", short: "סוכנים", icon: "pulse", primary: true,
-    lead: "כל חלק במערכת הוא סוכן עם תפקיד. כאן רואים מי עובד עכשיו, מה הוא מצא, ומי נתקע — הכל מהשרת, בזמן אמת." },
-  { id: "lab", path: "#/lab", label: "מעבדה", short: "מעבדה", icon: "lab", primary: true,
+  { id: "lab", path: "#/lab", label: "מעבדה", section: "stocks",
     lead: "אסטרטגיות מסחר שנבדקות על 10 שנות נתונים: הכללים נקבעים מראש, נבחרים על השנים הקודמות ונבחנים על שנה שהם לא ראו." },
+  { id: "tips", path: "#/tips", label: "מקורות", section: "stocks",
+    lead: "כל מקור טיפים נמדד מול SPY. מקור מקבל \"אמין\" רק אחרי 50 טיפים ו-60% הצלחה שאינה מקרית." },
+  { id: "etf", path: "#/etf", label: "חדר מסחר", section: "stocks",
+    lead: "שתי אסטרטגיות על קרנות סל, בכסף מדומה, מול פשוט להחזיק את SPY. הכללים נקבעו מראש." },
   { id: "pm", path: "#/pm", label: "Polymarket", short: "Polymarket", icon: "list", primary: true, bottom: true,
     lead: "מה זה Polymarket, איך מרוויחים ומפסידים בו, ומה המערכת שלנו בודקת לפני שהיא אומרת משהו." },
   { id: "pmoverview", path: "#/pm/overview", label: "סקירה", section: "pm", lead: "מה זז, מה מושך כסף, והאם יש הזדמנות שנתמכת בנתונים." },
   { id: "markets", path: "#/markets", label: "כל השווקים", section: "pm", lead: "חיפוש וסינון של השווקים הפתוחים. לחיצה על שוק פותחת הסבר מלא." },
-  { id: "scanner", path: "#/scanner", label: "הזדמנויות", section: "pm", lead: "חיפוש פערי תמחור בין שווקים קשורים, ובדיקה אם אפשר באמת לבצע אותם." },
-  { id: "research", path: "#/research", label: "מחקר", section: "pm", lead: "האם מחירי Polymarket ניבאו נכון בעבר, והאם כלל מסחר כלשהו הרוויח מחוץ למדגם." },
+  { id: "scanner", path: "#/scanner", label: "ניסוי פערים", section: "pm", lead: "פערי תמחור בין שווקים קשורים. ניסוי — עוד לא הוכח שאפשר לבצע אותם אחרי עמלות." },
+  { id: "research", path: "#/research", label: "מחקר", section: "pm", lead: "האם מחירי Polymarket ניבאו נכון בעבר, והאם כלל מסחר כלשהו הרוויח מחוץ למדגם — אחרי עמלות." },
   { id: "watchlist", path: "#/watchlist", label: "מעקב", section: "pm", lead: "השווקים שסימנת בכוכב." },
+  { id: "performance", path: "#/performance", label: "ביצועי מחקר", short: "ביצועים", icon: "radar", primary: true, bottom: true,
+    lead: "כל אסטרטגיה וכל מקור, במניות וב-Polymarket, על לוח אחד: מה נבדק על העבר, מה נמדד קדימה, מה עבר ומה נכשל." },
+  { id: "agents", path: "#/agents", label: "חדר הסוכנים", short: "סוכנים", icon: "pulse", primary: true,
+    lead: "כל חלק במערכת הוא סוכן עם תפקיד. כאן רואים מי עובד עכשיו, מה הוא מצא, ומי נתקע — הכל מהשרת, בזמן אמת." },
   { id: "system", path: "#/system", label: "מערכת", short: "מערכת", icon: "pulse", lead: "האם האיסוף רץ, מה נכשל, ומתי עודכן כל דבר." },
   { id: "more", path: "#/more", label: "עוד", short: "עוד", icon: "more", bottom: true, lead: "שאר המסכים." },
 ];
+const STOCK_TABS = ["stocks", "evidence", "check", "lab", "tips", "etf"];
 const PM_TABS = ["pm", "pmoverview", "markets", "scanner", "research", "watchlist"];
 function buildNav() {
   const top = $("#top-nav"), bottom = $("#bottom-nav");
@@ -137,8 +142,9 @@ function route() {
   current = id;
   const r = ROUTES.find((x) => x.id === id);
   const inPm = id === "detail" || PM_TABS.includes(id);
-  const topId = inPm ? "pm" : id;
-  const bottomId = inPm ? "pm" : (ROUTES.find((x) => x.id === id && x.bottom) ? id : "more");
+  const inStocks = STOCK_TABS.includes(id);
+  const topId = inPm ? "pm" : inStocks ? "stocks" : id;
+  const bottomId = inPm ? "pm" : inStocks ? "stocks" : (ROUTES.find((x) => x.id === id && x.bottom) ? id : "more");
   document.querySelectorAll("#top-nav [data-route]").forEach((a) => a.toggleAttribute("aria-current", a.dataset.route === topId));
   document.querySelectorAll("#bottom-nav [data-route]").forEach((a) => a.toggleAttribute("aria-current", a.dataset.route === bottomId));
   const view = $("#view");
@@ -147,6 +153,8 @@ function route() {
   if (id !== "detail" && r) parts.push(h("header", { class: "page-head" }, h("h1", null, r.id === "pm" ? "Polymarket — מה זה ואיך זה עובד" : r.label), r.lead ? h("p", null, r.lead) : null));
   if (inPm) parts.push(h("nav", { class: "subtabs", "aria-label": "Polymarket" },
     PM_TABS.map((t) => { const x = ROUTES.find((y) => y.id === t); return h("a", { href: x.path, "aria-current": (t === id || (id === "detail" && t === "markets")) ? "page" : null }, t === "pm" ? "מה זה" : x.label); })));
+  if (inStocks) parts.push(h("nav", { class: "subtabs", "aria-label": "מניות" },
+    STOCK_TABS.map((t) => { const x = ROUTES.find((y) => y.id === t); return h("a", { href: x.path, "aria-current": t === id ? "page" : null }, t === "stocks" ? "סקירה" : x.label); })));
   view.replaceChildren(...parts, body);
   document.title = (id === "detail" ? "שוק" : (r?.label || "")) + " · ראיות";
   scrollTo(0, 0);
@@ -874,6 +882,80 @@ function plainMarket(m) {
     h("span", { class: "faint" }, "זו הערכת המשתתפים, לא תחזית שבדקנו."));
 }
 
+// ---- Stocks overview ----
+PAGES.stocks = async (view) => {
+  const d = await api("/api/stocks/overview").catch(() => null);
+  if (current !== "stocks") return;
+  if (!d) { view.replaceChildren(empty("לא הצלחתי לקרוא נתוני שוק כרגע.")); return; }
+  const sgn = (v, dg = 1) => { if (v == null) return "—"; const r = Number((v * 100).toFixed(dg)) || 0; return ltr((r > 0 ? "+" : "") + r.toFixed(dg) + "%", r > 0 ? "up" : r < 0 ? "down" : ""); };
+  const etfs = d.etfs || [];
+  const spy = etfs.find((x) => x.symbol === "SPY");
+  const above = etfs.filter((x) => x.symbol.startsWith("XL") && x.above_ma200 === true).length;
+  const sectors = etfs.filter((x) => x.symbol.startsWith("XL"));
+  const lead = [...sectors].sort((a, b) => (b.vs_spy_3m ?? -9) - (a.vs_spy_3m ?? -9));
+  const LBL = { breakout_volume: "פריצה עם מחזור", dip_exhaustion: "דיפ", ma_stack: "ממוצעים", near_52w_high: "שיא שנתי", momentum_12_1: "מומנטום", low_volatility: "תנודתיות נמוכה", turn_of_month: "מעבר חודש", rsi2_pullback: "תיקון קצר" };
+  view.replaceChildren(h("div", { class: "stack" },
+    h("div", { class: "reasons" },
+      h("div", { class: "reason" }, h("div", { class: "k" }, "S&P 500 · 3 חודשים"), h("div", { class: "v" }, spy ? sgn(spy.r3m) : "—"),
+        h("div", { class: "d" }, spy ? h("span", null, "שנה: ", sgn(spy.r1y), spy.above_ma200 != null ? (spy.above_ma200 ? " · מעל ממוצע 200" : " · מתחת לממוצע 200") : "") : "")),
+      h("div", { class: "reason" }, h("div", { class: "k" }, "רוחב השוק"), h("div", { class: "v" }, `${above} מתוך ${sectors.length} סקטורים`),
+        h("div", { class: "d" }, "מעל הממוצע של 200 יום. הרבה סקטורים מעל = עלייה רחבה, מעט = עלייה של מניות בודדות.")),
+      h("a", { class: "reason", href: "#/lab" }, h("div", { class: "k" }, "איתותים פתוחים"), h("div", { class: "v" }, String((d.signals || []).length)),
+        h("div", { class: "d" }, "עסקאות מדומות של אסטרטגיות המעבדה שעדיין פתוחות. לא המלצה — מדידה."))),
+    card("סקטורים", `${d.source}. ממוין לפי ביצועים מול S&P 500 ב-3 החודשים האחרונים`,
+      h("div", { class: "scroll-x" }, h("table", { class: "t" },
+        h("thead", null, h("tr", null, ["קרן", "שבוע", "חודש", "3 חודשים", "מול SPY (3 ח׳)", "מתחילת השנה", "שנה", "ממוצע 200"].map((x) => h("th", null, x)))),
+        h("tbody", null, [...etfs.filter((x) => !x.symbol.startsWith("XL")), ...lead].map((x) => h("tr", null,
+          h("td", null, h("a", { href: "#/check/" + x.symbol }, ltr(x.symbol)), " ", h("span", { class: "faint" }, x.name)),
+          h("td", null, sgn(x.r1w)), h("td", null, sgn(x.r1m)), h("td", null, sgn(x.r3m)), h("td", null, x.symbol === "SPY" ? "—" : sgn(x.vs_spy_3m)),
+          h("td", null, sgn(x.ytd)), h("td", null, sgn(x.r1y)), h("td", null, x.above_ma200 == null ? "—" : x.above_ma200 ? "מעל" : "מתחת"))))))),
+    card("איתותים של אסטרטגיות במחקר", "נרשמו לפני פתיחת המסחר ונמדדים עד היציאה. אסטרטגיה שלא הוכחה — האיתות שלה הוא ניסוי, לא סיבה לקנות",
+      (d.signals || []).length ? h("div", { class: "scroll-x" }, h("table", { class: "t" },
+        h("thead", null, h("tr", null, ["יום האיתות", "אסטרטגיה", "מניה", "מצב"].map((x) => h("th", null, x)))),
+        h("tbody", null, d.signals.slice(0, 12).map((r) => h("tr", null, h("td", null, ltr(r.signal_day)), h("td", null, LBL[r.strategy] || r.strategy),
+          h("td", null, h("a", { href: "#/check/" + r.symbol }, ltr(r.symbol))), h("td", null, r.status === "open" ? "פתוחה" : "ממתינה לפתיחה")))))) : empty("אין איתותים פתוחים. המעקב מתחיל אחרי ההרצה הראשונה של המעבדה.")),
+    card("קניות של מנהלים (SEC Form 4)", "מנהל או דירקטור שקנה מניות של החברה שלו בכסף שלו, 25 אלף דולר ומעלה",
+      (d.sec_buys || []).length ? h("div", { class: "mlist" }, d.sec_buys.map((b) => h("a", { class: "mrow", href: "#/check/" + b.symbol },
+        h("div", { class: "q" }, ltr(b.symbol), h("span", { class: "faint" }, " · " + (b.title || ""))),
+        h("div", { class: "px" }, ltr(usd(b.value)), h("div", { class: "faint" }, new Date(b.accepted).toLocaleDateString("he-IL")))))) : empty("עוד אין קניות במעקב.")),
+    d.missing && d.missing.length ? h("p", { class: "faint" }, "חסרים נתונים: ", ltr(d.missing.join(", "))) : null));
+};
+
+// ---- Research performance (all engines) ----
+PAGES.performance = async (view) => {
+  const d = await api("/api/performance").catch(() => null);
+  if (current !== "performance") return;
+  if (!d) { view.replaceChildren(empty("לא הצלחתי לקרוא את לוח הביצועים.")); return; }
+  const E = { stocks: "מניות", polymarket: "Polymarket", sources: "מקורות טיפים" };
+  const ST = { passed: ["ok", "עבר"], promising: ["wait", "מבטיח"], failed: ["bad", "נכשל"], collecting: ["", "צובר נתונים"] };
+  const KIND = [["historical", "בדיקה על העבר", "נבחן על תקופה שהכללים לא ראו. גם אם עבר — עוד לא הוכיח שאפשר לבצע אותו בפועל."],
+    ["forward", "מעקב קדימה בכסף מדומה", "האיתות נרשם לפני שהמחיר זז, והתוצאה נמדדת במחירים אמיתיים. זה המבחן שקובע."],
+    ["measured", "מדידת מקורות", "המלצות של אחרים, שנמדדו מול SPY אחרי עלויות."]];
+  const sgn = (v, unit) => { if (v == null) return "—"; const r = Number((v * 100).toFixed(2)) || 0; return ltr((r > 0 ? "+" : "") + r.toFixed(2) + "%", r > 0 ? "up" : r < 0 ? "down" : ""); };
+  const S = d.summary || {};
+  const tot = (k) => Object.values(S).reduce((a, x) => a + (x[k] || 0), 0);
+  const passed = d.entries.filter((e) => e.status === "passed");
+  const head = passed.length
+    ? h("section", { class: "verdict go" }, h("h2", null, `${passed.length} עברו את הבדיקות`), h("p", null, passed.map((e) => `${e.label} (${E[e.engine]}, ${e.kind === "forward" ? "קדימה" : e.kind === "historical" ? "על העבר" : "מקור"})`).join(" · ")))
+    : h("section", { class: "verdict" }, h("h2", null, "עוד אין יתרון מוכח באף מנוע."),
+        h("p", null, `${tot("failed")} נכשלו, ${tot("promising")} מבטיחים, ${tot("collecting")} צוברים נתונים. כשמשהו יעבור — הוא יופיע כאן ותקבל הודעה בטלגרם.`));
+  const chips = h("div", { class: "reasons" }, Object.entries(E).map(([k, l]) => { const x = S[k] || {};
+    return h("div", { class: "reason" }, h("div", { class: "k" }, l), h("div", { class: "v" }, `${x.passed || 0} עברו`),
+      h("div", { class: "d" }, `${x.promising || 0} מבטיחים · ${x.failed || 0} נכשלו · ${x.collecting || 0} צוברים`)); }));
+  const order = { passed: 0, promising: 1, collecting: 2, failed: 3 };
+  const table = (rows) => h("div", { class: "scroll-x" }, h("table", { class: "t perf" },
+    h("thead", null, h("tr", null, ["מנוע", "אסטרטגיה / מקור", "מדגם", "ניצחו את הייחוס", "ממוצע נטו", "גבול תחתון 95%", "מדד ייחוס", "מצב"].map((x) => h("th", null, x)))),
+    h("tbody", null, rows.sort((a, b) => order[a.status] - order[b.status] || (b.n || 0) - (a.n || 0)).map((e) => { const [c, l] = ST[e.status] || ["", e.status];
+      return h("tr", null, h("td", null, E[e.engine] || e.engine), h("td", null, e.label, h("div", { class: "faint" }, e.why || "")),
+        h("td", null, ltr(String(e.n ?? 0))), h("td", null, e.success == null ? "—" : ltr(pct(e.success, 0))),
+        h("td", null, sgn(e.mean_net), h("div", { class: "faint" }, e.unit || "")), h("td", null, sgn(e.mean_lo95)),
+        h("td", null, h("span", { class: "faint" }, e.benchmark || "")), h("td", null, h("span", { class: "badge " + c }, l))); }))));
+  view.replaceChildren(h("div", { class: "stack" }, head, chips,
+    ...KIND.map(([k, t, sub]) => { const rows = d.entries.filter((e) => e.kind === k);
+      return card(t, sub, rows.length ? table(rows) : empty(k === "forward" ? "המעקב קדימה מתחיל אחרי ההרצה הראשונה של המעבדה." : "עוד אין תוצאות.")); }),
+    h("p", { class: "faint" }, "כל המספרים אחרי עלויות משוערות. \"ממוצע נטו\" נמדד ביחידה של כל מנוע — אל תשווה מספר של מניות למספר של Polymarket ישירות; השווה את המצב ואת הגבול התחתון.")));
+};
+
 // ---- Agents room ----
 const AGENT_HUE = { scout: 205, books: 175, listener: 265, sec: 30, guard: 0, judge: 145, trader: 45, researcher: 230, lab: 300, keeper: 95 };
 const AGENT_STATE = { working: "עובד עכשיו", ok: "תקין", late: "מאחר", error: "נתקע", idle: "עוד לא התחיל", quiet: "שקט" };
@@ -1006,7 +1088,7 @@ PAGES.alerts = (view) => view.replaceChildren(card("התראות", "עוד לא 
   h("p", { class: "sub" }, "מתוכנן: תזוזה חריגה בשוק ממעקב, הזדמנות מבנית בת-ביצוע, ותקלה בסריקה. ערוץ: טלגרם."),
   h("p", { class: "faint" }, "אין התראות מזויפות — המסך הזה יתמלא רק כשיהיה מנגנון אמיתי מאחוריו.")));
 PAGES.more = (view) => view.replaceChildren(h("div", { class: "stack" },
-  ["agents", "check", "lab", "etf", "pmoverview", "markets", "research", "system"].map((id) => { const r = ROUTES.find((x) => x.id === id);
+  ["agents", "evidence", "check", "lab", "tips", "etf", "pmoverview", "markets", "research", "system"].map((id) => { const r = ROUTES.find((x) => x.id === id);
     return h("a", { class: "reason", href: r.path }, h("div", { class: "v" }, r.label), h("div", { class: "d" }, r.lead)); })));
 
 // ---- System Health ----

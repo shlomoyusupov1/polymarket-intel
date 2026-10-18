@@ -272,3 +272,10 @@ details.more > summary { cursor: pointer; color: var(--accent); font-weight: 500
 .feed .t { color: var(--faint); } .feed .who { font-weight: 500; }
 @media (max-width: 560px) { .feed li { grid-template-columns: 48px 1fr auto; } .feed .what, .feed li > .faint { display: none; }
   .desks { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .desk { min-height: 190px; padding: 10px 8px; } .bubble { font-size: 12px; } }
+@media (max-width: 640px) {
+  table.perf th:nth-child(1), table.perf td:nth-child(1),
+  table.perf th:nth-child(4), table.perf td:nth-child(4),
+  table.perf th:nth-child(6), table.perf td:nth-child(6),
+  table.perf th:nth-child(7), table.perf td:nth-child(7) { display: none; }
+  table.perf td:nth-child(2) { min-width: 150px; }
+}
