@@ -31,10 +31,20 @@ stacked moving averages (all from the course), near the 52-week high (George & H
 Tests (`tests/test_stocklab.py`): signals use no future data; random markets find nothing; a planted,
 tradable edge is found out of sample; split adjustment; costs, Holm and clustered CI.
 
+## Forward paper tracking (`pmintel/lab_paper.py`, service `labpaper`)
+Every weekday after 17:15 New York, for each strategy with the parameters the lab chose last: the
+signals on the completed bar are written, timestamped and SHA-256 sealed — only if that happens before
+the next 09:30 open. Entry next open, exit after the same hold, same per-stock cost, vs SPY on the same
+sessions; one open position per strategy and symbol. Returns are computed from one adjusted series at
+exit (dividends counted). A strategy is "confirmed forward" only with ≥ 50 closed trades, ≥ 60% beating
+SPY after cost with Wilson LB > 50%, a positive week-clustered mean lower bound, **and** a passing
+backtest. Shown on the lab page (`#/lab`). Tests: `tests/test_lab_paper.py`.
+
 ## Running on the server
 ```bash
 cd ~/polymarket-intel && git pull && sudo docker compose up -d --build
 sudo docker compose run --rm stocklab      # a few minutes; prints one line per strategy
+# the labpaper service starts with `up -d` and records signals from the next US close
 ```
 Results: page **מעבדה** (`#/lab`). The screenshots in `docs/screenshots/lab-*.png` use synthetic data with
 a planted edge — they show the layout, not a finding.

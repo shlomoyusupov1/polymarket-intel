@@ -1,0 +1,199 @@
+"""Forward paper tracking of the strategy lab: the only test a backtest can't fake.
+
+Every trading day after the close, for each lab strategy with the parameters the lab chose last:
+  1. record the symbols whose signal fired on today's completed bar. The record is timestamped and
+     hashed; it counts only if it was written before the next session's 09:30 New York open;
+  2. each recorded signal enters at the next open and exits at the close `hold` sessions later,
+     exactly like the backtest, paying the same per-stock cost, against SPY over the same sessions;
+  3. one open position per strategy and symbol (no stacking the same bet).
+
+Returns are computed from one consistent adjusted price series at exit time, so a dividend paid
+mid-trade is counted and doesn't distort the price. Nothing here places orders.
+
+  docker compose run --rm labpaper --once
+  (service `labpaper` loops: runs every 30 min after 17:15 New York time on weekdays until done)
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import logging
+import math
+import time as _time
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from psycopg.types.json import Jsonb
+
+from . import db, stocklab as L
+
+log = logging.getLogger("pmintel.lab_paper")
+NY = ZoneInfo("America/New_York")
+READY_AFTER = time(17, 15)
+GATE = {"min_n": 50, "win_rate": 0.60}
+
+
+def complete(bars: list[dict], now_ny: datetime) -> list[dict]:
+    today = now_ny.date().isoformat()
+    return [b for b in bars if b["day"] < today or (b["day"] == today and now_ny.time() >= READY_AFTER)]
+
+
+def next_open(day: str) -> datetime:
+    """09:30 New York on the next weekday after `day` (holidays only make the deadline later)."""
+    d = date.fromisoformat(day) + timedelta(days=1)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return datetime.combine(d, time(9, 30), NY)
+
+
+def plan(lab: dict) -> dict[str, dict]:
+    """Strategy -> {'params', 'hold'} from the latest lab report (frozen until the next lab run)."""
+    out = {}
+    for name, v in (lab.get("strategies") or {}).items():
+        cp = v.get("current_params")
+        if cp and name in L.STRATEGIES:
+            out[name] = {"params": cp["params"], "hold": int(cp["hold"]), "verdict": v.get("verdict")}
+    return out
+
+
+def record_signals(conn, feats: dict, strategies: dict, now: datetime) -> int:
+    """Write today's signals. Returns how many new rows were sealed."""
+    n = 0
+    for name, p in strategies.items():
+        hits = L.live_signals(name, feats, p["params"])
+        last = max(f["day"][-1] for f in feats.values())
+        if now >= next_open(last):
+            log.warning("too late to record %s signals for %s", name, last)
+            continue
+        for sym in hits:
+            open_ = conn.execute("SELECT 1 FROM lab_signals WHERE strategy = %s AND symbol = %s AND status IN ('pending', 'open')",
+                                 (name, sym)).fetchone()
+            if open_:
+                continue
+            body = {"strategy": name, "params": p["params"], "hold": p["hold"], "symbol": sym, "signal_day": last,
+                    "recorded_at": now.isoformat()}
+            sha = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+            cur = conn.execute("""INSERT INTO lab_signals (strategy, params, hold, symbol, signal_day, recorded_at, sha256,
+                                                           lab_verdict, cost_rt, status)
+                                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending') ON CONFLICT DO NOTHING""",
+                               (name, Jsonb(p["params"]), p["hold"], sym, last, now, sha, p.get("verdict"),
+                                feats[sym]["cost"][-1]))
+            n += cur.rowcount
+    return n
+
+
+def settle(conn, feats: dict, spy: list[dict]) -> int:
+    """Fill entries and close trades whose hold has elapsed. Returns rows changed."""
+    sidx = {b["day"]: k for k, b in enumerate(spy)}
+    changed = 0
+    rows = conn.execute("""SELECT id, symbol, signal_day, hold, cost_rt, status FROM lab_signals
+                           WHERE status IN ('pending', 'open')""").fetchall()
+    for rid, sym, sday, hold, cost, status in rows:
+        f = feats.get(sym)
+        if not f:
+            continue
+        sday = sday.isoformat() if hasattr(sday, "isoformat") else str(sday)
+        try:
+            i = f["day"].index(sday)
+        except ValueError:
+            continue
+        e, x = i + 1, i + hold
+        if e >= len(f["day"]):
+            continue
+        if status == "pending":
+            conn.execute("UPDATE lab_signals SET status = 'open', entry_day = %s, entry_price = %s WHERE id = %s",
+                         (f["day"][e], f["o"][e], rid))
+            changed += 1
+        if x < len(f["day"]):
+            k = sidx.get(f["day"][e])
+            if k is None or k + hold - 1 >= len(spy) or spy[k + hold - 1]["day"] != f["day"][x]:
+                continue
+            r = f["c"][x] / f["o"][e] - 1
+            rs = spy[k + hold - 1]["c"] / spy[k]["o"] - 1
+            conn.execute("""UPDATE lab_signals SET status = 'closed', exit_day = %s, ret = %s, spy_ret = %s,
+                            excess = %s, closed_at = now() WHERE id = %s""",
+                         (f["day"][x], r, rs, r - rs - cost, rid))
+            changed += 1
+    return changed
+
+
+def _wilson_lo(k: int, n: int, z: float = 1.96) -> float:
+    if not n:
+        return 0.0
+    p = k / n
+    return max(0.0, (p + z * z / (2 * n) - z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n))
+
+
+def summary(rows: list[tuple]) -> dict:
+    """rows: (strategy, excess, entry_day) for closed trades -> per-strategy forward record."""
+    by: dict[str, list] = {}
+    for name, x, day in rows:
+        by.setdefault(name, []).append((x, day.isoformat() if hasattr(day, "isoformat") else str(day)))
+    out = {}
+    for name, v in by.items():
+        xs = [x for x, _ in v]
+        n, k = len(xs), sum(1 for x in xs if x > 0)
+        m, se = L.clustered_mean(xs, [L._week(d) for _, d in v])
+        lo = _wilson_lo(k, n)
+        confirmed = n >= GATE["min_n"] and k / n >= GATE["win_rate"] and lo > 0.5 and se is not None and m - 1.96 * se > 0
+        out[name] = {"n": n, "success_rate": k / n, "success_lo95": lo, "mean_excess": m,
+                     "mean_lo95": (m - 1.96 * se) if se else None,
+                     "status": "confirmed" if confirmed else ("collecting" if n < GATE["min_n"] else "not_confirmed")}
+    return out
+
+
+def run_once(conn, now: datetime | None = None, fetcher=L.fetch, pause: float = 0.4) -> dict:
+    now = now or datetime.now(timezone.utc)
+    now_ny = now.astimezone(NY)
+    lab = conn.execute("SELECT result FROM research_reports WHERE kind = 'stocklab_v1' ORDER BY id DESC LIMIT 1").fetchone()
+    if not lab:
+        log.info("no lab report yet: run `docker compose run --rm stocklab` first")
+        return {"recorded": 0, "settled": 0, "reason": "no_lab_report"}
+    strategies = plan(lab[0])
+    with db.job_run(conn, "lab_paper") as run:
+        spy = complete(fetcher(L.BENCH, range_="2y"), now_ny)
+        feats, missing = {}, []
+        for s in L.UNIVERSE:
+            try:
+                b = complete(fetcher(s, range_="2y"), now_ny)
+                if len(b) >= 260:
+                    feats[s] = L.features(b)
+            except Exception as e:  # noqa: BLE001
+                missing.append(s)
+                log.info("no bars for %s: %s", s, e)
+            _time.sleep(pause)
+        settled = settle(conn, feats, spy)
+        recorded = record_signals(conn, feats, strategies, now) if feats else 0
+        run["items"] = recorded + settled
+        run["detail"] = {"recorded": recorded, "settled": settled, "missing": missing,
+                         "latest_bar": spy[-1]["day"] if spy else None}
+    log.info("lab paper: recorded %d, settled %d, missing %s", recorded, settled, missing)
+    return {"recorded": recorded, "settled": settled, "latest_bar": spy[-1]["day"] if spy else None}
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--once", action="store_true")
+    args = ap.parse_args()
+    conn = db.connect()
+    db.init_schema(conn)
+    if args.once:
+        print(run_once(conn))
+        return
+    done_for = None
+    while True:
+        now_ny = datetime.now(NY)
+        if now_ny.weekday() < 5 and now_ny.time() >= READY_AFTER and done_for != now_ny.date():
+            try:
+                rep = run_once(conn)
+                if rep.get("latest_bar") == now_ny.date().isoformat() or now_ny.hour >= 21 or rep.get("reason"):
+                    done_for = now_ny.date()
+            except Exception:
+                log.exception("lab paper run failed; retrying in 30 min")
+        _time.sleep(1800)
+
+
+if __name__ == "__main__":
+    main()
