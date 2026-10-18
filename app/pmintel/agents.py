@@ -18,7 +18,7 @@ AGENTS = [
     ("judge", "השופט", "מודד כל מקור מול SPY אחרי עלויות", (), None),
     ("trader", "הסוחר", "סוחר בכסף מדומה בקרנות סל לפי כללים קבועים", ("etf_paper",), timedelta(days=4)),
     ("researcher", "החוקר", "בודק אם מחירי Polymarket ניבאו נכון", ("research", "backfill"), None),
-    ("lab", "המעבדה", "בודקת אסטרטגיות מניות על 10 שנים", ("stocklab",), None),
+    ("lab", "המעבדה", "בודקת אסטרטגיות על 10 שנים ועוקבת אחריהן קדימה", ("stocklab", "lab_paper"), None),
     ("keeper", "אב הבית", "מעבד, זיכרון, דיסק ומסד הנתונים", (), None),
 ]
 JOB_AGENT = {j: a[0] for a in AGENTS for j in a[3]}

@@ -275,3 +275,12 @@ CREATE TABLE IF NOT EXISTS lab_signals (
     UNIQUE (strategy, symbol, signal_day)
 );
 CREATE INDEX IF NOT EXISTS lab_signals_status_idx ON lab_signals (status, strategy);
+
+-- What the alert loop already announced (pmintel/alerts.py)
+CREATE TABLE IF NOT EXISTS alerts_state (
+    key         text PRIMARY KEY,
+    kind        text NOT NULL,            -- problem | good
+    first_at    timestamptz NOT NULL,
+    resolved_at timestamptz,
+    text        text
+);
