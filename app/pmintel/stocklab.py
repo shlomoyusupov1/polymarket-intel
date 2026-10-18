@@ -25,7 +25,7 @@ import json
 import logging
 import math
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from statistics import median
 from zoneinfo import ZoneInfo
 
@@ -64,6 +64,18 @@ STRATEGIES = {
         "label": "קרוב לשיא שנתי (מחקר: George & Hwang 2004)",
         "rule": "היום הראשון שהסגירה בטווח g% מהשיא של 52 השבועות",
         "grid": [{"g": g} for g in (0.02, 0.05)]},
+    "momentum_12_1": {
+        "label": "מומנטום של שנה (מחקר: Jegadeesh & Titman 1993)",
+        "rule": "ביום המסחר הראשון בחודש: המניות ב-q% העליונים של הרשימה לפי התשואה של 12 החודשים האחרונים, בלי החודש האחרון",
+        "grid": [{"q": q} for q in (0.1, 0.2)]},
+    "low_volatility": {
+        "label": "תנודתיות נמוכה (מחקר: Frazzini & Pedersen 2014)",
+        "rule": "ביום המסחר הראשון בחודש: המניות ב-q% הכי רגועות של הרשימה לפי התנודתיות של 60 יום",
+        "grid": [{"q": q} for q in (0.1, 0.2)]},
+    "turn_of_month": {
+        "label": "מעבר חודש (מחקר: Lakonishok & Smidt 1988)",
+        "rule": "קונים שלושה ימי מסחר לפני סוף החודש (ובגרסה השנייה רק מעל ממוצע 200)",
+        "grid": [{"trend": t} for t in (False, True)]},
     "rsi2_pullback": {
         "label": "תיקון קצר במגמת עלייה (היפוך לטווח קצר)",
         "rule": "RSI של יומיים מתחת ל-t ומעל ממוצע 200",
@@ -151,7 +163,45 @@ def features(bars: list[dict]) -> dict:
     f["max55"] = [max(hi[i - 55:i]) if i >= 55 else None for i in range(n)]
     f["max252"] = [max(hi[i - 251:i + 1]) if i >= 251 else None for i in range(n)]
     f["dvmed50"] = [median(dv[i - 50:i]) if i >= 50 else None for i in range(n)]
+    f["mom"] = [c[i - 21] / c[i - 252] - 1 if i >= 252 else None for i in range(n)]
+    r = [None] + [c[i] / c[i - 1] - 1 for i in range(1, n)]
+    vol = [None] * n
+    for i in range(60, n):
+        w = r[i - 59:i + 1]
+        m = sum(w) / 60
+        vol[i] = math.sqrt(sum((x - m) ** 2 for x in w) / 59)
+    f["vol60"] = vol
+    f["mom_rank"] = [None] * n
+    f["vol_rank"] = [None] * n
     return f
+
+
+def add_ranks(feats: dict, min_names: int = 10) -> None:
+    """Cross-sectional percentile ranks per day (1 = highest), from each symbol's own value that day.
+    Uses only that day's values, so a rank never depends on later data."""
+    for key, out in (("mom", "mom_rank"), ("vol60", "vol_rank")):
+        by_day: dict[str, list] = {}
+        for sym, f in feats.items():
+            for i, (d, v) in enumerate(zip(f["day"], f[key])):
+                if v is not None:
+                    by_day.setdefault(d, []).append((v, sym, i))
+        for d, vals in by_day.items():
+            if len(vals) < min_names:
+                continue
+            vals.sort()
+            n = len(vals)
+            for rank, (_v, sym, i) in enumerate(vals):
+                feats[sym][out][i] = (rank + 1) / n
+
+
+def _weekdays_left(day: str) -> int:
+    """Weekdays after `day` until the end of its month (the trading calendar is known in advance)."""
+    d = date.fromisoformat(day)
+    k, x = 0, d + timedelta(days=1)
+    while x.month == d.month:
+        k += x.weekday() < 5
+        x += timedelta(days=1)
+    return k
 
 
 # ---------------------------------------------------------------- signals (data up to close of i only)
@@ -179,6 +229,19 @@ def signal(name: str, f: dict, i: int, p: dict) -> bool:
         return _stack(f, i, p["long"])
     if name == "near_52w_high":
         return _near_high(f, i, p["g"])
+    if name in ("momentum_12_1", "low_volatility"):
+        first = i >= 1 and f["day"][i][:7] != f["day"][i - 1][:7]
+        if not first:
+            return False
+        if name == "momentum_12_1":
+            r = f["mom_rank"][i]
+            return r is not None and r > 1 - p["q"]
+        r = f["vol_rank"][i]
+        return r is not None and r <= p["q"]
+    if name == "turn_of_month":
+        if _weekdays_left(f["day"][i]) != 3:
+            return False
+        return not p["trend"] or (f["ma200"][i] is not None and c[i] > f["ma200"][i])
     if name == "rsi2_pullback":
         r, ma = f["rsi2"][i], f["ma200"][i]
         return r is not None and ma is not None and r < p["t"] and c[i] > ma
@@ -366,6 +429,7 @@ def run(conn=None, fetcher=fetch, symbols=UNIVERSE, pause: float = 0.4) -> dict:
             log.info("no data for %s: %s", s, e)
             missing.append(s)
         time.sleep(pause)
+    add_ranks(feats)
     res = {}
     for name, spec in STRATEGIES.items():
         wf = walk_forward(name, feats, spy)

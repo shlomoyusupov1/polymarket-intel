@@ -163,6 +163,7 @@ def run_once(conn, now: datetime | None = None, fetcher=L.fetch, pause: float = 
                 missing.append(s)
                 log.info("no bars for %s: %s", s, e)
             _time.sleep(pause)
+        L.add_ranks(feats)
         settled = settle(conn, feats, spy)
         recorded = record_signals(conn, feats, strategies, now) if feats else 0
         run["items"] = recorded + settled

@@ -929,7 +929,7 @@ PAGES.agents = async (view) => {
 PAGES.lab = async (view) => {
   const [d, fp] = await Promise.all([api("/api/lab/latest").catch(() => null), api("/api/lab/paper").catch(() => null)]);
   if (current !== "lab") return;
-  if (!d) { view.replaceChildren(card("המעבדה עוד לא רצה", "הריצה הראשונה מורידה 10 שנות מחירים ל-65 מניות ובודקת 5 אסטרטגיות. זה לוקח כמה דקות.",
+  if (!d) { view.replaceChildren(card("המעבדה עוד לא רצה", "הריצה הראשונה מורידה 10 שנות מחירים ל-65 מניות ובודקת 8 אסטרטגיות. זה לוקח כמה דקות.",
     h("pre", { class: "code", dir: "ltr" }, "sudo docker compose run --rm stocklab"))); return; }
   const r = d.result, S = r.strategies;
   const V = { candidate_for_paper: ["ok", "מועמדת למעקב בכסף מדומה"], edge_below_target: ["wait", "יש יתרון, מתחת ל-60%"],
