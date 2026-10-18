@@ -11,9 +11,12 @@ A self-review found three ways the system could fool us:
    ≥ 30 measured tips; a source that fails the correction is shown as "promising", not "reliable".
 
 ## Strategy lab (`pmintel/stocklab.py`)
-Five strategies with small grids fixed in advance: breakout with volume, dip after selling exhaustion,
+Eight strategies with small grids fixed in advance: breakout with volume, dip after selling exhaustion,
 stacked moving averages (all from the course), near the 52-week high (George & Hwang 2004), and a
-2-day RSI pullback in an uptrend (short-term reversal).
+2-day RSI pullback in an uptrend (short-term reversal), 12-1 momentum (Jegadeesh & Titman 1993, top q% of
+the universe on the first trading day of the month), low volatility (Frazzini & Pedersen 2014, calmest q%
+by 60-day volatility, monthly) and turn of the month (Lakonishok & Smidt 1988, buy three trading days
+before month end). Cross-sectional ranks use only that day's values across the universe.
 
 - 65 liquid large caps + SPY, ~10 years of split/dividend-adjusted daily bars from Yahoo.
 - Entry next open, exit at the close after 5/10/20 sessions, per-stock estimated cost, no overlapping

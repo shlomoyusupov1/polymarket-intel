@@ -41,6 +41,7 @@ def test_signals_never_look_ahead():
 def test_random_market_finds_nothing():
     spy = walk(0, 1800)
     feats = {f"S{k}": L.features(walk(100 + k, 1800)) for k in range(12)}
+    L.add_ranks(feats)
     for name in L.STRATEGIES:
         wf = L.walk_forward(name, feats, spy)
         s = L.summarize(wf["oos"])
@@ -83,3 +84,25 @@ def test_fetch_adjusts_splits(monkeypatch):
     b = L.fetch("X", client=C())
     assert abs(b[0]["c"] - 101) < 1e-9 and abs(b[0]["o"] - 100) < 1e-9  # 4:1 split removed
     assert b[0]["dv"] == 404 * 10 and b[1]["dv"] == 102 * 40
+
+
+def test_cross_sectional_ranks_and_calendar_never_look_ahead():
+    bars = {f"S{k}": walk(300 + k, 700, drift=0.0002 * (k - 6)) for k in range(12)}
+    full = {s: L.features(b) for s, b in bars.items()}
+    L.add_ranks(full)
+    fired = 0
+    for i in range(300, 690, 9):
+        cut = {s: L.features(b[: i + 1]) for s, b in bars.items()}
+        L.add_ranks(cut)
+        for name in ("momentum_12_1", "low_volatility", "turn_of_month"):
+            for p in L.STRATEGIES[name]["grid"]:
+                for s in bars:
+                    a, b = L.signal(name, full[s], i, p), L.signal(name, cut[s], i, p)
+                    assert a == b, (name, p, s, i)
+                    fired += a
+    assert fired > 0
+    assert L._weekdays_left("2026-10-27") == 3 and L._weekdays_left("2026-10-30") == 0
+    # the top-momentum names really are the ones with the best 12-1 return that day
+    i = 400
+    top = max(full, key=lambda s: full[s]["mom"][i])
+    assert full[top]["mom_rank"][i] == 1.0
