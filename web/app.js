@@ -105,6 +105,8 @@ const ROUTES = [
     lead: "כל מקור טיפים נמדד מול SPY. מקור מקבל \"אמין\" רק אחרי 50 טיפים ו-60% הצלחה שאינה מקרית." },
   { id: "etf", path: "#/etf", label: "חדר מסחר", short: "מסחר", icon: "wallet", primary: true,
     lead: "שתי אסטרטגיות על קרנות סל, בכסף מדומה, מול פשוט להחזיק את SPY. הכללים נקבעו מראש." },
+  { id: "agents", path: "#/agents", label: "חדר הסוכנים", short: "סוכנים", icon: "pulse", primary: true,
+    lead: "כל חלק במערכת הוא סוכן עם תפקיד. כאן רואים מי עובד עכשיו, מה הוא מצא, ומי נתקע — הכל מהשרת, בזמן אמת." },
   { id: "lab", path: "#/lab", label: "מעבדה", short: "מעבדה", icon: "lab", primary: true,
     lead: "אסטרטגיות מסחר שנבדקות על 10 שנות נתונים: הכללים נקבעים מראש, נבחרים על השנים הקודמות ונבחנים על שנה שהם לא ראו." },
   { id: "pm", path: "#/pm", label: "Polymarket", short: "Polymarket", icon: "list", primary: true, bottom: true,
@@ -120,7 +122,7 @@ const ROUTES = [
 const PM_TABS = ["pm", "pmoverview", "markets", "scanner", "research", "watchlist"];
 function buildNav() {
   const top = $("#top-nav"), bottom = $("#bottom-nav");
-  ROUTES.filter((r) => r.primary || r.id === "system").forEach((r) => top.append(h("a", { href: r.path, "data-route": r.id }, r.label)));
+  ROUTES.filter((r) => r.primary || r.id === "system").forEach((r) => top.append(h("a", { href: r.path, "data-route": r.id, title: r.label }, r.short || r.label)));
   ROUTES.filter((r) => r.bottom).forEach((r) => bottom.append(h("a", { href: r.path, "data-route": r.id }, icon(r.icon, 22), r.short)));
 }
 let current = null;
@@ -872,6 +874,57 @@ function plainMarket(m) {
     h("span", { class: "faint" }, "זו הערכת המשתתפים, לא תחזית שבדקנו."));
 }
 
+// ---- Agents room ----
+const AGENT_HUE = { scout: 205, books: 175, listener: 265, sec: 30, guard: 0, judge: 145, trader: 45, researcher: 230, lab: 300, keeper: 95 };
+const AGENT_STATE = { working: "עובד עכשיו", ok: "תקין", late: "מאחר", error: "נתקע", idle: "עוד לא התחיל", quiet: "שקט" };
+function robot(id, state) {
+  const hue = AGENT_HUE[id] ?? 210;
+  const body = `hsl(${hue} 55% 52%)`, dark = `hsl(${hue} 45% 32%)`;
+  const eyes = state === "error"
+    ? [s("path", { d: "M17 21l5 5M22 21l-5 5M34 21l5 5M39 21l-5 5", class: "r-x" })]
+    : state === "idle" || state === "quiet"
+      ? [s("path", { d: "M16 24h7M33 24h7", class: "r-shut" })]
+      : [s("rect", { x: 16, y: 20, width: 7, height: 8, rx: 2, class: "r-eye" }), s("rect", { x: 33, y: 20, width: 7, height: 8, rx: 2, class: "r-eye" })];
+  return s("svg", { viewBox: "0 0 56 64", class: "robot " + state, "aria-hidden": "true" },
+    s("line", { x1: 28, y1: 4, x2: 28, y2: 11, stroke: dark, "stroke-width": 2 }),
+    s("circle", { cx: 28, cy: 4, r: 3, class: "r-ant" }),
+    s("rect", { x: 6, y: 10, width: 44, height: 30, rx: 9, fill: body }),
+    s("rect", { x: 11, y: 15, width: 34, height: 19, rx: 6, class: "r-face" }),
+    ...eyes,
+    s("path", { d: "M14 44h28l-3 16H17z", fill: dark }));
+}
+PAGES.agents = async (view) => {
+  const d = await api("/api/agents").catch(() => null);
+  if (current !== "agents") return;
+  if (!d) { view.replaceChildren(empty("לא הצלחתי לקרוא את מצב הסוכנים מהשרת.")); return; }
+  const A = d.agents, by = Object.fromEntries(A.map((a) => [a.id, a]));
+  const count = (st) => A.filter((a) => a.state === st).length;
+  const bad = A.filter((a) => a.state === "error" || a.state === "late");
+  const desk = (a) => h("a", { class: "desk " + a.state, href: a.href || "#/system", style: `--hue:${AGENT_HUE[a.id] ?? 210}` },
+    h("div", { class: "bubble" }, a.line),
+    robot(a.id, a.state),
+    h("div", { class: "plate" }, h("strong", null, a.name), h("span", { class: "st" }, AGENT_STATE[a.state] || a.state, a.ago ? " · " + a.ago : "")),
+    h("div", { class: "role" }, a.role));
+  const zone = (title, ids) => h("section", { class: "zone" }, h("h3", null, title), h("div", { class: "desks" }, ids.map((i) => by[i]).filter(Boolean).map(desk)));
+  const NAME = Object.fromEntries(A.map((a) => [a.id, a.name]));
+  const ST = { ok: ["ok", "הצליח"], partial: ["wait", "חלקי"], error: ["bad", "נכשל"], interrupted: ["bad", "נקטע"], running: ["info", "רץ"] };
+  const feed = d.feed.map((r) => { const [c, l] = ST[r.status] || ["", r.status];
+    return h("li", null, h("span", { class: "t" }, ltr(new Date(r.started_at).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }))),
+      h("span", { class: "who" }, NAME[r.agent] || r.job), h("span", { class: "what" }, JOBS[r.job] || r.job),
+      r.items != null ? h("span", { class: "faint" }, ltr(Number(r.items).toLocaleString())) : null, h("span", { class: "badge " + c }, l)); });
+  view.replaceChildren(h("div", { class: "stack" },
+    h("section", { class: "verdict" + (bad.length ? "" : " go") },
+      h("h2", null, bad.length ? `${bad.length} סוכנים צריכים תשומת לב` : "כל הסוכנים בעבודה"),
+      h("p", null, `${count("working")} עובדים ברגע זה · ${count("ok")} סיימו סבב בהצלחה · ${count("idle")} עוד לא התחילו`,
+        bad.length ? " · " + bad.map((a) => a.name).join(", ") : "")),
+    h("div", { class: "room" },
+      zone("איסוף", ["scout", "books", "listener", "sec"]),
+      zone("בדיקה ושיפוט", ["guard", "judge", "researcher", "lab"]),
+      zone("ביצוע ותחזוקה", ["trader", "keeper"])),
+    card("יומן עבודה", "הסבבים האחרונים של כל הסוכנים, מהחדש לישן", feed.length ? h("ul", { class: "feed" }, feed) : empty("עוד אין סבבים.")),
+    h("p", { class: "faint" }, "המצב נלקח מהשרת: מתי כל משימה רצה, אם הצליחה, ומה היא מצאה. סוכן שלא רץ מסומן ככזה — שום דבר כאן לא מדומה.")));
+};
+
 // ---- Strategy lab ----
 PAGES.lab = async (view) => {
   const d = await api("/api/lab/latest").catch(() => null);
@@ -932,12 +985,12 @@ PAGES.alerts = (view) => view.replaceChildren(card("התראות", "עוד לא 
   h("p", { class: "sub" }, "מתוכנן: תזוזה חריגה בשוק ממעקב, הזדמנות מבנית בת-ביצוע, ותקלה בסריקה. ערוץ: טלגרם."),
   h("p", { class: "faint" }, "אין התראות מזויפות — המסך הזה יתמלא רק כשיהיה מנגנון אמיתי מאחוריו.")));
 PAGES.more = (view) => view.replaceChildren(h("div", { class: "stack" },
-  ["check", "lab", "etf", "pmoverview", "markets", "research", "system"].map((id) => { const r = ROUTES.find((x) => x.id === id);
+  ["agents", "check", "lab", "etf", "pmoverview", "markets", "research", "system"].map((id) => { const r = ROUTES.find((x) => x.id === id);
     return h("a", { class: "reason", href: r.path }, h("div", { class: "v" }, r.label), h("div", { class: "d" }, r.lead)); })));
 
 // ---- System Health ----
 const JOBS = { collect: "איסוף נזילים (15 דק׳)", collect_full: "סריקה מלאה", orderbooks: "ספרי פקודות", sync_closed: "סנכרון שווקים שנסגרו",
-  backfill: "Backfill היסטורי", research: "דוח מחקר", etf_paper: "ניסוי ETF (נייר)" };
+  backfill: "Backfill היסטורי", research: "דוח מחקר", etf_paper: "מסחר מדומה בקרנות סל", sec_insider: "קניות מנהלים (SEC)", sec_events: "13D ודוחות (SEC)", stocklab: "מעבדת אסטרטגיות" };
 PAGES.system = async (view) => {
   const [hl, integ] = await Promise.all([api("/api/health"), api("/api/integration/latest").catch(() => null)]);
   if (current !== "system") return;
