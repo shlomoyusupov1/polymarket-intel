@@ -81,6 +81,10 @@ async def alert_loop(cl, conn):
             for msg in await asyncio.to_thread(alerts.check, conn):
                 await cl.send_message("me", "Polymarket Intelligence\n" + msg)
                 log.info("alert sent: %s", msg[:80])
+            now = datetime.now(timezone.utc)
+            if await asyncio.to_thread(alerts.digest_due, conn, now):
+                await cl.send_message("me", await asyncio.to_thread(alerts.digest_text, conn, now))
+                log.info("daily digest sent")
         except Exception:
             log.exception("alert check failed")
         await asyncio.sleep(900)
@@ -130,7 +134,9 @@ async def run(args):
             print(f"{n_tips:5d} {n_msgs:6d} {n_syms:4d}  {cid}\t{name}")
         return
     if args.test_alert:
+        from . import alerts
         await cl.send_message("me", "Polymarket Intelligence\n🔔 בדיקה: התראות מהמערכת יגיעו לכאן (Saved Messages).")
+        await cl.send_message("me", alerts.digest_text(conn, datetime.now(timezone.utc)))
         print("test alert sent to Saved Messages")
         return
     if args.list_chats:

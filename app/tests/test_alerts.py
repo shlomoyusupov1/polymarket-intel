@@ -39,3 +39,24 @@ def test_each_problem_is_announced_once_and_its_recovery_once():
     assert any("קניות מנהלים (SEC) נכשל: boom" in m for m in msgs)
     assert not any("קניות מנהלים" in m for m in A.check(conn))
     conn.close()
+
+
+@pytest.mark.skipif(not DB, reason="PMINTEL_TEST_DB not set")
+def test_daily_digest_once_per_israel_day_and_built_from_data():
+    from psycopg.types.json import Jsonb
+    from pmintel import db
+    conn = db.connect(DB)
+    conn.execute("DROP TABLE IF EXISTS alerts_state")
+    db.init_schema(conn)
+    early = datetime(2026, 10, 18, 4, 0, tzinfo=timezone.utc)   # 07:00 in Israel
+    later = datetime(2026, 10, 18, 5, 30, tzinfo=timezone.utc)  # 08:30 in Israel
+    assert not A.digest_due(conn, early, hour=8)
+    assert A.digest_due(conn, later, hour=8) and not A.digest_due(conn, later, hour=8)
+    assert A.digest_due(conn, later + timedelta(days=1), hour=8)
+    assert not A.digest_due(conn, later + timedelta(days=2), hour=-1)
+    conn.execute("INSERT INTO research_reports (kind, params, result) VALUES ('etf_paper_v2', '{}', %s)",
+                 (Jsonb({"accounts": {"trend": {"return": 0.012}}, "benchmark_spy": {"return": 0.004}}),))
+    conn.execute("INSERT INTO alerts_state (key, kind, first_at, text) VALUES ('fail:x', 'problem', now(), 'x נכשל')")
+    t = A.digest_text(conn, later)
+    assert t.startswith("☀️") and "trend +1.2%" in t and "SPY +0.4%" in t and "1 בעיות פתוחות — x נכשל" in t
+    conn.close()
