@@ -37,6 +37,11 @@ services:
     <<: *app
     command: ["python", "-m", "pmintel.etf_job"]
 
+  # Forward paper tracking of strategy-lab signals (daily after the US close)
+  labpaper:
+    <<: *app
+    command: ["python", "-m", "pmintel.lab_paper"]
+
   # Tip tracker: read-only Telegram listener (owner's account) + outcome updates
   tips:
     <<: *app

@@ -225,3 +225,5 @@ ul.clean li { margin: 4px 0; }
 .yr { font-size: 12.5px; padding: 3px 8px; border-radius: 8px; background: var(--sunk); }
 .yr.up { background: var(--up-bg); } .yr.down { background: var(--down-bg); }
 pre.code { background: var(--sunk); border-radius: var(--r-sm); padding: 12px 14px; overflow-x: auto; font-size: 13px; margin: 10px 0 0; }
+details.more { margin-top: 12px; }
+details.more > summary { cursor: pointer; color: var(--accent); font-weight: 500; padding: 4px 0; }

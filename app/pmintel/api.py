@@ -286,6 +286,19 @@ def lab_latest():
     return rows[0] if rows else None
 
 
+@app.get("/api/lab/paper")
+def lab_paper():
+    """Forward paper record of the lab strategies (signals sealed before the next open)."""
+    from . import lab_paper as P
+    with db.connect() as c:
+        closed = c.execute("SELECT strategy, excess, entry_day FROM lab_signals WHERE status = 'closed'").fetchall()
+    rows = q("""SELECT strategy, symbol, signal_day, recorded_at, hold, status, entry_day, entry_price, exit_day,
+                       ret, spy_ret, excess, cost_rt, lab_verdict FROM lab_signals ORDER BY signal_day DESC, id DESC LIMIT 60""")
+    first = q("SELECT min(signal_day) AS first_day, count(*) AS total FROM lab_signals")[0]
+    return {"summary": P.summary(closed), "recent": rows, "first_day": first["first_day"], "total": first["total"],
+            "gate": P.GATE}
+
+
 @app.get("/api/integration/latest")
 def integration_latest():
     rows = q("""SELECT id, created_at, result FROM research_reports

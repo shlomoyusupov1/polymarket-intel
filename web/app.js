@@ -874,7 +874,7 @@ function plainMarket(m) {
 
 // ---- Strategy lab ----
 PAGES.lab = async (view) => {
-  const d = await api("/api/lab/latest").catch(() => null);
+  const [d, fp] = await Promise.all([api("/api/lab/latest").catch(() => null), api("/api/lab/paper").catch(() => null)]);
   if (current !== "lab") return;
   if (!d) { view.replaceChildren(card("המעבדה עוד לא רצה", "הריצה הראשונה מורידה 10 שנות מחירים ל-65 מניות ובודקת 5 אסטרטגיות. זה לוקח כמה דקות.",
     h("pre", { class: "code", dir: "ltr" }, "sudo docker compose run --rm stocklab"))); return; }
@@ -910,7 +910,28 @@ PAGES.lab = async (view) => {
       v.current_params ? h("p", { class: "faint" }, "הגדרות שנבחרו לשנה האחרונה: ", ltr(Object.entries(v.current_params.params).map(([a, b]) => `${a}=${b}`).join(", ")), `, החזקה ${v.current_params.hold} ימי מסחר`) : null,
       v.signals_today && v.signals_today.length ? h("p", null, "איתות ביום האחרון: ", v.signals_today.map((x, i) => [i ? ", " : "", h("a", { href: "#/check/" + x }, ltr(x))]),
         h("span", { class: "faint" }, v.verdict === "candidate_for_paper" ? " · נכנס למעקב" : " · לא לפעולה — האסטרטגיה לא הוכחה")) : null); };
-  view.replaceChildren(h("div", { class: "stack" }, head,
+  const FS = { confirmed: ["ok", "אומתה קדימה"], not_confirmed: ["bad", "לא אומתה"], collecting: ["", "צוברת עסקאות"] };
+  const fsum = fp ? fp.summary : {};
+  const STAT = { pending: "ממתין לפתיחה", open: "פתוחה", closed: "נסגרה" };
+  const forward = card("מעקב קדימה בכסף מדומה",
+    fp && fp.total ? `כל יום אחרי הסגירה נרשמים האיתותים ונחתמים לפני פתיחת המסחר הבא. מאז ${new Date(fp.first_day).toLocaleDateString("he-IL")}: ${fp.total} איתותים.`
+      : "מתחיל אחרי ההרצה הראשונה של המעבדה בשרת: כל יום אחרי הסגירה נרשמים האיתותים ונחתמים לפני פתיחת המסחר הבא.",
+    h("div", { class: "scroll-x" }, h("table", { class: "t" },
+      h("thead", null, h("tr", null, ["אסטרטגיה", "עסקאות שנסגרו", "ניצחו את SPY", "ממוצע לעסקה אחרי עלות", "מצב"].map((x) => h("th", null, x)))),
+      h("tbody", null, list.map(([k, v]) => { const f = fsum[k];
+        let [c, l] = f ? FS[f.status] : ["", "עוד אין עסקאות"];
+        if (f && f.status === "confirmed" && v.verdict !== "candidate_for_paper") [c, l] = ["wait", "חיובית קדימה, אבל נכשלה על העבר"];
+        return h("tr", null, h("td", null, v.label), h("td", null, ltr(String(f ? f.n : 0))),
+          h("td", null, f ? ltr(pct(f.success_rate, 0)) : "—"), h("td", null, f ? signed(f.mean_excess) : "—"),
+          h("td", null, h("span", { class: "badge " + c }, l))); })))),
+    fp && fp.recent.length ? h("details", { class: "more" }, h("summary", null, "האיתותים האחרונים"),
+      h("div", { class: "scroll-x" }, h("table", { class: "t" },
+        h("thead", null, h("tr", null, ["יום", "אסטרטגיה", "מניה", "מצב", "מול SPY אחרי עלות"].map((x) => h("th", null, x)))),
+        h("tbody", null, fp.recent.map((r) => h("tr", null, h("td", null, ltr(r.signal_day)), h("td", null, (S[r.strategy] || {}).label || r.strategy),
+          h("td", null, h("a", { href: "#/check/" + r.symbol }, ltr(r.symbol))), h("td", null, STAT[r.status] || r.status),
+          h("td", null, r.excess == null ? "—" : signed(r.excess)))))))) : null,
+    h("p", { class: "faint" }, `אסטרטגיה "אומתה קדימה" רק אחרי ${fp ? fp.gate.min_n : 50} עסקאות אמיתיות קדימה, 60% הצלחה שאינה מקרית, ורווח ממוצע חיובי אחרי עלויות — וגם עברה את הבדיקה על העבר. רק אז מדברים על כסף אמיתי.`));
+  view.replaceChildren(h("div", { class: "stack" }, head, forward,
     ...list.map(cardFor),
     card("איך נבדק", `${r.universe.length} מניות גדולות ונזילות, ${r.first_day} עד ${r.last_day}, מול ${r.benchmark}`,
       h("ul", { class: "clean" },
