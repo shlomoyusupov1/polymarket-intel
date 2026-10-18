@@ -70,12 +70,28 @@ async def outcome_loop(conn):
         await asyncio.sleep(6 * 3600)
 
 
+async def alert_loop(cl, conn):
+    """Every 15 min: announce new problems, recoveries and passed gates to the owner's Saved Messages."""
+    from . import alerts
+    if not alerts.enabled():
+        log.info("alerts disabled (ALERTS=0)")
+        return
+    while True:
+        try:
+            for msg in await asyncio.to_thread(alerts.check, conn):
+                await cl.send_message("me", "Polymarket Intelligence\n" + msg)
+                log.info("alert sent: %s", msg[:80])
+        except Exception:
+            log.exception("alert check failed")
+        await asyncio.sleep(900)
+
+
 async def run(args):
     conn = db.connect()
     db.init_schema(conn)
     cl = client()
     if cl is None:
-        if args.login or args.list_chats or args.history or args.scan:
+        if args.login or args.list_chats or args.history or args.scan or args.test_alert:
             raise SystemExit("TG_API_ID / TG_API_HASH are not set in .env")
         log.info("Telegram not configured; updating outcomes only")
         await outcome_loop(conn)
@@ -113,6 +129,10 @@ async def run(args):
         for n_tips, n_msgs, n_syms, cid, name in stats[:40]:
             print(f"{n_tips:5d} {n_msgs:6d} {n_syms:4d}  {cid}\t{name}")
         return
+    if args.test_alert:
+        await cl.send_message("me", "Polymarket Intelligence\n🔔 בדיקה: התראות מהמערכת יגיעו לכאן (Saved Messages).")
+        print("test alert sent to Saved Messages")
+        return
     if args.list_chats:
         async for d in cl.iter_dialogs():
             if d.is_group or d.is_channel:
@@ -146,6 +166,7 @@ async def run(args):
             log.info("recorded %d tip(s) from %s", n, names.get(ev.chat_id))
 
     asyncio.create_task(outcome_loop(conn))
+    asyncio.create_task(alert_loop(cl, conn))
     await cl.run_until_disconnected()
 
 
@@ -154,6 +175,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--login", action="store_true")
     ap.add_argument("--list-chats", action="store_true")
+    ap.add_argument("--test-alert", action="store_true", help="send one test alert to your Saved Messages")
     ap.add_argument("--scan", type=int, default=0, help="rank groups by stock-symbol messages in the last N days (stores nothing)")
     ap.add_argument("--history", type=int, default=0, help="import the last N days, then exit")
     asyncio.run(run(ap.parse_args()))
