@@ -279,11 +279,80 @@ def research_latest():
     return rows[0] if rows else None
 
 
+@app.get("/api/agents")
+def agents_room():
+    """Every background job as a worker with a live status line (see agents.py)."""
+    from . import agents as A, tips as T
+    jobs = {r["job"]: r for r in q("""SELECT DISTINCT ON (job) job, started_at, finished_at, status, items, error
+                                     FROM job_runs ORDER BY job, started_at DESC""")}
+    f = q("""SELECT (SELECT count(*) FROM markets WHERE active AND NOT closed) AS open_markets,
+                    (SELECT max(ts) FROM snapshots) AS last_snapshot,
+                    (SELECT round(100.0 * avg(valid::int), 1) FROM orderbooks
+                      WHERE ts > now() - interval '24 hours') AS orderbook_valid_pct_24h,
+                    (SELECT max(ts) FROM tips WHERE kind = 'telegram') AS last_tip,
+                    (SELECT count(*) FROM tips WHERE ts > now() - interval '24 hours') AS tips_24h,
+                    (SELECT count(*) FROM tips WHERE ts > now() - interval '7 days' AND verdict IS NOT NULL) AS checked_7d,
+                    (SELECT count(*) FROM tips WHERE ts > now() - interval '7 days' AND verdict = 'red') AS red_7d,
+                    (SELECT count(*) FROM sec_buys WHERE accepted > now() - interval '30 days') AS sec_buys_30d,
+                    (SELECT count(*) FROM sec_events WHERE accepted > now() - interval '30 days') AS sec_events_30d""")[0]
+    f["open_markets"] = int(f["open_markets"] or 0)
+    for k in ("orderbook_valid_pct_24h",):
+        f[k] = float(f[k]) if f[k] is not None else None
+    with db.connect() as c:
+        board = T.leaderboard(c)
+    f["sources_total"] = len(board)
+    f["sources_tested"] = sum(1 for b in board if b["gate"]["n"] >= 30)
+    f["sources_reliable"] = sum(1 for b in board if b["gate"]["status"] == "reliable")
+    etf = etf_latest()
+    if etf:
+        acc = (etf["result"] or {}).get("accounts") or {}
+        spy = ((etf["result"] or {}).get("benchmark_spy") or {}).get("return")
+        parts = [f"{k}: {v.get('return', 0) * 100:+.1f}%" for k, v in acc.items()]
+        if parts:
+            f["etf_line"] = " · ".join(parts) + (f" · SPY {spy * 100:+.1f}%" if spy is not None else "")
+    WF = {"supported": "נמצא יתרון שעבר הכול", "oos_positive_needs_execution_check": "חיובי מחוץ למדגם, ממתין לאימות ביצוע",
+          "not_supported": "לא נמצא יתרון", "insufficient_data": "אין עדיין מספיק נתוני עבר"}
+    res = research_latest()
+    if res:
+        wf = next(iter((res["result"] or {}).values()), {}).get("walk_forward") or {}
+        f["research_line"] = WF.get(wf.get("verdict"), wf.get("verdict") or "רץ, בלי מסקנה")
+    lab = lab_latest()
+    if lab:
+        st = (lab["result"] or {}).get("strategies") or {}
+        cands = [v["label"] for v in st.values() if v.get("verdict") == "candidate_for_paper"]
+        f["lab_line"] = (f"{len(cands)} מועמדות: " + ", ".join(cands)) if cands else f"0 מתוך {len(st)} אסטרטגיות עברו"
+    hm = q("SELECT * FROM host_metrics ORDER BY ts DESC LIMIT 1")
+    if hm:
+        h = hm[0]
+        f.update(cpu_pct=h["cpu_pct"], host_ts=h["ts"],
+                 disk_pct=100.0 * h["disk_used"] / h["disk_total"] if h["disk_total"] else None,
+                 mem_pct=100.0 * (1 - h["mem_available"] / h["mem_total"]) if h["mem_total"] else None,
+                 db_gb=(h["db_bytes"] or 0) / 1e9)
+    feed = q("""SELECT job, status, started_at, finished_at, items FROM job_runs
+                ORDER BY started_at DESC LIMIT 20""")
+    for r in feed:
+        r["agent"] = A.JOB_AGENT.get(r["job"])
+    return {"agents": A.build(jobs, f), "feed": feed}
+
+
 @app.get("/api/lab/latest")
 def lab_latest():
     rows = q("""SELECT id, created_at, result FROM research_reports
                 WHERE kind = 'stocklab_v1' ORDER BY id DESC LIMIT 1""")
     return rows[0] if rows else None
+
+
+@app.get("/api/lab/paper")
+def lab_paper():
+    """Forward paper record of the lab strategies (signals sealed before the next open)."""
+    from . import lab_paper as P
+    with db.connect() as c:
+        closed = c.execute("SELECT strategy, excess, entry_day FROM lab_signals WHERE status = 'closed'").fetchall()
+    rows = q("""SELECT strategy, symbol, signal_day, recorded_at, hold, status, entry_day, entry_price, exit_day,
+                       ret, spy_ret, excess, cost_rt, lab_verdict FROM lab_signals ORDER BY signal_day DESC, id DESC LIMIT 60""")
+    first = q("SELECT min(signal_day) AS first_day, count(*) AS total FROM lab_signals")[0]
+    return {"summary": P.summary(closed), "recent": rows, "first_day": first["first_day"], "total": first["total"],
+            "gate": P.GATE}
 
 
 @app.get("/api/integration/latest")

@@ -256,6 +256,26 @@ ALTER TABLE sec_events ADD COLUMN IF NOT EXISTS url text;
 ALTER TABLE tips ADD COLUMN IF NOT EXISTS cost_rt double precision;
 ALTER TABLE tips ADD COLUMN IF NOT EXISTS cost_src text;
 
+-- Forward paper tracking of strategy-lab signals (pmintel/lab_paper.py)
+CREATE TABLE IF NOT EXISTS lab_signals (
+    id          bigserial PRIMARY KEY,
+    strategy    text NOT NULL,
+    params      jsonb NOT NULL,
+    hold        integer NOT NULL,
+    symbol      text NOT NULL,
+    signal_day  date NOT NULL,
+    recorded_at timestamptz NOT NULL,
+    sha256      text NOT NULL,
+    lab_verdict text,
+    cost_rt     double precision NOT NULL,
+    status      text NOT NULL,              -- pending | open | closed
+    entry_day   date, entry_price double precision,
+    exit_day    date, ret double precision, spy_ret double precision, excess double precision,
+    closed_at   timestamptz,
+    UNIQUE (strategy, symbol, signal_day)
+);
+CREATE INDEX IF NOT EXISTS lab_signals_status_idx ON lab_signals (status, strategy);
+
 -- What the alert loop already announced (pmintel/alerts.py)
 CREATE TABLE IF NOT EXISTS alerts_state (
     key         text PRIMARY KEY,
