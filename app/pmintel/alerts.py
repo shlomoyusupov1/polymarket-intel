@@ -120,3 +120,61 @@ def check(conn, now: datetime | None = None) -> list[str]:
     now = now or datetime.now(timezone.utc)
     jobs, facts = gather(conn)
     return diff(conn, problems(jobs, facts, now), good_news(facts), now)
+
+
+# ---------------------------------------------------------------- daily morning digest
+DIGEST_TZ = "Asia/Jerusalem"
+
+
+def digest_text(conn, now: datetime) -> str:
+    """One short morning summary built only from the database."""
+    from . import tips
+    lines = ["☀️ בוקר טוב — סיכום יומי"]
+    board = tips.leaderboard(conn)
+    reliable = [b["source"] for b in board if b["gate"]["status"] == "reliable"]
+    lines.append("• היום: " + (f"יש מקור אמין — {reliable[0]}" if reliable
+                               else "אין מה לעשות. אף מקור עוד לא הוכיח שהוא מנצח את SPY."))
+    n, red = conn.execute("""SELECT count(*), count(*) FILTER (WHERE verdict = 'red') FROM tips
+                             WHERE ts > now() - interval '24 hours'""").fetchone()
+    syms = [r[0] for r in conn.execute("""SELECT symbol FROM tips WHERE ts > now() - interval '24 hours'
+                                          GROUP BY symbol ORDER BY count(*) DESC LIMIT 5""").fetchall()]
+    lines.append(f"• טיפים ב-24 שע׳: {n}" + (f" (אדומים: {red})" if n else "") + (f" — {', '.join(syms)}" if syms else ""))
+    lab = conn.execute("SELECT result FROM research_reports WHERE kind = 'stocklab_v1' ORDER BY id DESC LIMIT 1").fetchone()
+    if lab:
+        st = (lab[0] or {}).get("strategies", {})
+        cands = [v.get("label", k) for k, v in st.items() if v.get("verdict") == "candidate_for_paper"]
+        line = f"• מעבדה: {len(cands)} מתוך {len(st)} אסטרטגיות עברו על העבר"
+        try:
+            o, c = conn.execute("""SELECT count(*) FILTER (WHERE status IN ('pending', 'open')),
+                                          count(*) FILTER (WHERE status = 'closed') FROM lab_signals""").fetchone()
+            line += f" · מעקב קדימה: {o} פתוחות, {c} נסגרו"
+        except Exception:  # noqa: BLE001 - forward tracker not deployed yet
+            pass
+        lines.append(line)
+    etf = conn.execute("SELECT result FROM research_reports WHERE kind = 'etf_paper_v2' ORDER BY id DESC LIMIT 1").fetchone()
+    if etf and (etf[0] or {}).get("accounts"):
+        acc = etf[0]["accounts"]
+        spy = (etf[0].get("benchmark_spy") or {}).get("return")
+        parts = [f"{k} {v.get('return', 0) * 100:+.1f}%" for k, v in acc.items()]
+        lines.append("• חדר מסחר: " + ", ".join(parts) + (f" · SPY {spy * 100:+.1f}%" if spy is not None else ""))
+    open_problems = [t for (t,) in conn.execute("SELECT text FROM alerts_state WHERE kind = 'problem' AND resolved_at IS NULL")]
+    lines.append("• מערכת: " + ("הכל תקין" if not open_problems else f"{len(open_problems)} בעיות פתוחות — " + "; ".join(open_problems[:3])))
+    site = os.environ.get("SITE_URL")
+    if site:
+        lines.append(site)
+    return "\n".join(lines)
+
+
+def digest_due(conn, now: datetime, hour: int | None = None) -> bool:
+    """True once per local day, at or after the digest hour (DIGEST_HOUR, default 8; -1 = off)."""
+    from zoneinfo import ZoneInfo
+    hour = int(os.environ.get("DIGEST_HOUR", "8")) if hour is None else hour
+    if hour < 0:
+        return False
+    local = now.astimezone(ZoneInfo(DIGEST_TZ))
+    if local.hour < hour:
+        return False
+    key = "digest:" + local.date().isoformat()
+    cur = conn.execute("INSERT INTO alerts_state (key, kind, first_at) VALUES (%s, 'digest', %s) ON CONFLICT DO NOTHING",
+                       (key, now))
+    return cur.rowcount == 1
