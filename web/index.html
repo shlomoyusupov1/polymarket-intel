@@ -3,36 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0B0F14">
+<meta name="theme-color" content="#F2F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F1720" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="PM Intel">
-<title>Polymarket Intelligence</title>
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ראיות">
+<title>ראיות</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=2">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <a class="skip" href="#view">דלג לתוכן</a>
-<div class="shell">
-  <aside class="sidebar" aria-label="ניווט">
-    <div class="brand">
-      <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18 9 11l4 4 7-9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <div><div class="brand-name">Polymarket Intel</div><div class="brand-sub">מחקר בלבד · ללא מסחר</div></div>
-    </div>
-    <nav id="side-nav" class="side-nav"></nav>
-    <div class="side-foot" id="side-health"></div>
-  </aside>
-  <div class="main">
-    <header class="topbar">
-      <div class="topbar-title" id="page-title">מרכז הפיקוד</div>
-      <div id="top-health" class="pill" role="status"></div>
-    </header>
-    <main id="view" tabindex="-1"></main>
+<header class="masthead">
+  <div class="mast-inner">
+    <a class="brand" href="#/" aria-label="ראיות — היום">
+      <span class="brand-mark" aria-hidden="true">ר</span>
+      <span><span class="brand-name">ראיות</span><span class="brand-sub">מחקר השקעות אישי · בלי כסף אמיתי</span></span>
+    </a>
+    <nav id="top-nav" class="top-nav" aria-label="ניווט ראשי"></nav>
+    <div id="top-health" class="pill" role="status"></div>
   </div>
-</div>
+</header>
+<main id="view" tabindex="-1"></main>
 <nav class="bottom-nav" id="bottom-nav" aria-label="ניווט ראשי"></nav>
-<script src="app.js?v=14"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>
