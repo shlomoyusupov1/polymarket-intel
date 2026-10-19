@@ -463,7 +463,16 @@ def summarize(oos: list[dict]) -> dict:
     years: dict[str, list[float]] = {}
     for t in oos:
         years.setdefault(t["entry"][:4], []).append(t["x"] - t["base"])
+    # cumulative excess per trade in entry order: the deepest fall from a running peak (sum of trades, not
+    # an account curve — overlapping trades aren't sized; it shows losing streaks, not a portfolio drawdown)
+    cum = peak = dd = 0.0
+    for t in sorted(oos, key=lambda t: t["entry"]):
+        cum += t["x"]
+        peak = max(peak, cum)
+        dd = min(dd, cum - peak)
     return {"n": n, "symbols": len({t["sym"] for t in oos}), "success_rate": k / n if n else None,
+            "clusters": len(set(keys)), "first_entry": min(t["entry"] for t in oos) if n else None,
+            "last_entry": max(t["entry"] for t in oos) if n else None, "max_dd_sum": dd if n else None,
             "success_lo95": _wilson_lo(k, n) if n else None,
             "mean_excess": m, "mean_excess_lo95": (m - 1.96 * se) if se else None,
             "edge_vs_baseline": ma, "edge_lo95": (ma - 1.96 * sea) if sea else None, "p_edge": p,
@@ -520,6 +529,40 @@ def walk_forward(name: str, feats: dict, spy: list[dict], m: Market = STOCKS) ->
     return {"oos": oos, "choices": choices}
 
 
+def bench_stats(bench: list[dict], start: str | None, year: int) -> dict | None:
+    """Buy-and-hold of the benchmark from `start` (first out-of-sample day): return, CAGR, volatility, max drawdown."""
+    b = [x for x in bench if start and x["day"] >= start]
+    if len(b) < 20:
+        return None
+    c = [x["c"] for x in b]
+    r = [c[i] / c[i - 1] - 1 for i in range(1, len(c))]
+    m = sum(r) / len(r)
+    vol = math.sqrt(sum((x - m) ** 2 for x in r) / (len(r) - 1) * year)
+    peak, dd = c[0], 0.0
+    for x in c:
+        peak = max(peak, x)
+        dd = min(dd, x / peak - 1)
+    yrs = len(c) / year
+    return {"from": b[0]["day"], "to": b[-1]["day"], "total_return": c[-1] / c[0] - 1,
+            "cagr": (c[-1] / c[0]) ** (1 / yrs) - 1 if yrs > 0 else None, "volatility": vol, "max_drawdown": dd}
+
+
+COST_GRID = (0.002, 0.005, 0.01, 0.02)
+
+
+def cost_sensitivity(oos: list[dict], s: dict, assumed: float) -> list[dict]:
+    """Same trades re-scored at other fixed round-trip costs. The edge over random entry doesn't move
+    (the random baseline pays the same cost); what moves is the result against the benchmark."""
+    out = []
+    for c in COST_GRID:
+        xs = [t["x"] + assumed - c for t in oos]
+        n, k = len(xs), sum(1 for x in xs if x > 0)
+        v = {**s, "success_rate": k / n if n else None, "success_lo95": _wilson_lo(k, n) if n else None}
+        out.append({"cost": c, "success_rate": v["success_rate"], "mean_excess": sum(xs) / n if n else None,
+                    "verdict": verdict(v) if n else "insufficient_data"})
+    return out
+
+
 def live_signals(name: str, feats: dict, params: dict) -> list[str]:
     """Symbols whose signal fired on the latest bar (for forward paper tracking)."""
     out = []
@@ -548,11 +591,12 @@ def run(conn=None, fetcher=fetch, symbols=None, pause: float = 0.4, m: Market = 
             missing.append(s)
         time.sleep(pause)
     add_ranks(feats)
-    res = {}
+    res, oos_by = {}, {}
     for name in m.strategies:
         spec = STRATEGIES[name]
         wf = walk_forward(name, feats, spy, m)
         s = summarize(wf["oos"])
+        oos_by[name] = wf["oos"]
         last = list(wf["choices"].values())[-1] if wf["choices"] else None
         res[name] = {"label": spec["label"], "rule": spec["rule"], "grid": spec["grid"], "holds": m.holds, "side": side(name),
                      "choices": wf["choices"], **s,
@@ -562,7 +606,12 @@ def run(conn=None, fetcher=fetch, symbols=None, pause: float = 0.4, m: Market = 
     for k, v in res.items():
         v["p_holm"] = ph[k]
         v["verdict"] = verdict(v)
-    out = {"market": m.key, "strategies": res, "universe": list(feats), "missing": missing, "benchmark": m.bench,
+        if m.fixed_cost is not None:
+            v["cost_sensitivity"] = cost_sensitivity(oos_by[k], v, m.fixed_cost)
+    years = sorted({int(d[:4]) for f in feats.values() for d in f["day"]})
+    oos_start = f"{years[FIRST_TEST_YEARS]}-01-01" if len(years) > FIRST_TEST_YEARS else None
+    out = {"market": m.key, "strategies": res, "benchmark_stats": bench_stats(spy, oos_start, m.year),
+           "assumed_cost": m.fixed_cost, "universe": list(feats), "missing": missing, "benchmark": m.bench,
            "first_day": min(f["day"][0] for f in feats.values()) if feats else None,
            "last_day": max(f["day"][-1] for f in feats.values()) if feats else None,
            "seconds": round(time.monotonic() - t0, 1),

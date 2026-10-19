@@ -799,35 +799,42 @@ PAGES.etf = async (view) => {
 
 // ---- היום (Today) ----
 const ENGINE = { stocks: "מניות", crypto: "קריפטו", polymarket: "Polymarket", sources: "קבוצות טיפים" };
-const STATUS_RANK = { passed: 0, promising: 1, collecting: 2, failed: 3 };
+// the five research states, shared by every screen (see app/pmintel/performance.py)
+const STATE = {
+  confirmed: { cls: "ok", he: "אומתה קדימה", en: "Forward Confirmed", d: "עברה קריטריונים שנקבעו מראש על איתותים שנרשמו לפני שהמחיר זז. עדיין לא הבטחה לרווח." },
+  validating: { cls: "info", he: "בבדיקה קדימה", en: "Forward Validation", d: "נבדקת עכשיו בכסף מדומה. אין עדיין מסקנה." },
+  candidate: { cls: "wait", he: "מועמדת מהעבר", en: "Historical Candidate", d: "עברה בדיקה על נתוני עבר בלבד. זו השערה, לא הוכחה." },
+  insufficient: { cls: "", he: "אין מספיק נתונים", en: "Insufficient Data", d: "מעט מדי תצפיות כדי להגיד משהו." },
+  failed: { cls: "bad", he: "נכשלה", en: "Not Supported / Failed", d: "אין יתרון אחרי עלויות, או שהבדיקה קדימה נכשלה." },
+};
+const STATUS_RANK = { confirmed: 0, validating: 1, candidate: 2, insufficient: 3, failed: 4 };
+const stateBadge = (st) => { const x = STATE[st] || STATE.insufficient; return h("span", { class: "badge " + x.cls, title: x.en }, x.he); };
 // one plain sentence per engine, from the scoreboard only (no guessing)
 function engineThought(engine, entries) {
   const es = entries.filter((e) => e.engine === engine);
-  const hist = es.filter((e) => e.kind === "historical"), fwd = es.filter((e) => e.kind === "forward");
-  const best = [...es].sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || (b.mean_lo95 ?? -9) - (a.mean_lo95 ?? -9))[0];
-  const fwdPassed = fwd.filter((e) => e.status === "passed");
-  if (fwdPassed.length) return ["ok", `${fwdPassed.map((e) => e.label).join(", ")} עברה את כל הבדיקות, גם קדימה. זה הזמן לדבר על סכום קטן.`];
+  const by = (st) => es.filter((e) => e.status === st);
+  const BM = { stocks: "המדד", crypto: "החזקת ביטקוין", polymarket: "מחיר השוק" }[engine];
+  if (by("confirmed").length) return ["ok", `${by("confirmed").map((e) => e.label).join(", ")}: אומתה קדימה. שווה לדבר על סכום קטן, אחרי בירור עמלות ומס.`];
   if (engine === "sources") {
     if (!es.length) return ["", "עוד לא הגיעו טיפים למדידה."];
-    const meas = es.filter((e) => (e.n || 0) >= 30);
+    const meas = es.filter((e) => e.status !== "insufficient");
     if (!meas.length) return ["", `${es.length} קבוצות במעקב. אף אחת עוד לא צברה 30 טיפים, אז אין עדיין מה לשפוט.`];
-    const failed = meas.filter((e) => e.status === "failed").length;
-    return [failed === meas.length ? "bad" : "wait", `${meas.length} קבוצות נמדדו: ${failed} מפסידות למדד אחרי עמלות. אל תקנה לפי טיפים.`];
+    return [by("failed").length === meas.length ? "bad" : "wait", `${meas.length} קבוצות נמדדו: ${by("failed").length} מפסידות למדד אחרי עמלות. אל תקנה לפי טיפים.`];
   }
+  const hist = es.filter((e) => e.kind === "historical");
   if (!hist.length) return ["", engine === "polymarket" ? "המחקר על שווקים שנגמרו עוד לא רץ." : "עוד לא נבדק על נתונים אמיתיים. ממתין להרצה הראשונה בשרת."];
-  const histPassed = hist.filter((e) => e.status === "passed");
-  if (histPassed.length) {
-    const n = Math.max(0, ...fwd.filter((e) => histPassed.some((x) => x.label === e.label)).map((e) => e.n || 0));
-    return ["wait", `${histPassed.map((e) => e.label).join(", ")} עברה על העבר. עכשיו בודקים אותה קדימה בכסף מדומה: ${n} מתוך 50 עסקאות.`];
+  const cand = by("candidate").filter((e) => e.kind === "historical");
+  if (cand.length) {
+    const fw = es.filter((e) => e.kind === "forward" && cand.some((c) => c.label === e.label));
+    return ["wait", `${cand.map((e) => e.label).join(", ")}: מועמדת מהעבר, כלומר השערה. בבדיקה קדימה: ${Math.max(0, ...fw.map((e) => e.n || 0))} מתוך 50 עסקאות.`];
   }
-  const prom = hist.filter((e) => e.status === "promising");
-  if (prom.length) return ["wait", `${hist.length} שיטות נבדקו. אף אחת לא עברה, אבל ל-${prom.length} יש סימן חיובי קטן (${best.label}).`];
-  return ["bad", `${hist.length} שיטות נבדקו על העבר. אף אחת לא מנצחת את ${engine === "crypto" ? "החזקת ביטקוין" : engine === "stocks" ? "המדד" : "מחיר השוק"} אחרי עמלות.`];
+  const failed = hist.filter((e) => e.status === "failed").length, ins = hist.filter((e) => e.status === "insufficient").length;
+  return ["bad", `${hist.length} שיטות נבדקו על העבר: ${failed} נכשלו${ins ? `, ל-${ins} אין מספיק נתונים` : ""}. אף אחת לא מנצחת את ${BM} אחרי עמלות.`];
 }
-// how far the most advanced strategy got: 0 = nothing tested, 1 = passed on history, 2 = passed forward
+// how far the most advanced strategy got: 0 = nothing passed, 1 = historical candidate, 2 = forward confirmed
 function ladderStage(entries) {
-  if (entries.some((e) => e.kind === "forward" && e.status === "passed")) return 2;
-  if (entries.some((e) => e.kind === "historical" && e.status === "passed")) return 1;
+  if (entries.some((e) => e.status === "confirmed" && e.engine !== "sources")) return 2;
+  if (entries.some((e) => e.status === "candidate")) return 1;
   return 0;
 }
 let homeTimer = null;
@@ -845,19 +852,34 @@ function agentsMini(d) {
   const feed = d.feed.slice(0, 6).map((r) => h("li", null, h("span", { class: "t" }, ltr(new Date(r.started_at).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }))),
     ` ${NAME[r.agent] || "המערכת"} ${ST[r.status] || r.status}: ${JOBS[r.job] || r.job}`,
     r.items != null && r.status !== "running" ? h("span", { class: "faint" }, ` · ${Number(r.items).toLocaleString()} פריטים`) : null));
-  return h("div", null, list, feed.length ? h("div", null, h("h4", { class: "mini-title" }, "מה קרה לאחרונה"), h("ul", { class: "feed-mini" }, feed)) : null);
+  const cnt = (f) => d.agents.filter(f).length;
+  const sum = h("p", { class: "agents-sum" }, `${cnt((a) => a.state === "working")} עובדים עכשיו · ${cnt((a) => a.state === "ok")} הצליחו בסבב האחרון · `,
+    h("span", { class: cnt((a) => a.state === "error" || a.state === "late") ? "down" : "" }, `${cnt((a) => a.state === "error" || a.state === "late")} נכשלו או מאחרים`),
+    ` · ${cnt((a) => a.state === "idle" || a.state === "quiet")} מחכים למידע`);
+  return h("div", null, sum, list, feed.length ? h("div", null, h("h4", { class: "mini-title" }, "מה קרה לאחרונה"), h("ul", { class: "feed-mini" }, feed)) : null);
 }
-function paperPicks(stk, cry, labs) {
+function paperPicks(stk, cry, labs, entries) {
   const label = (m, k) => ((labs[m] || {}).strategies || {})[k]?.label || k;
+  const sideOf = (m, k) => ((labs[m] || {}).strategies || {})[k]?.side;
+  const statusOf = (m, k) => { const pre = m === "crypto" ? "crypto:" : "";
+    const fw = entries.find((e) => e.id === `fwd:${pre}${k}`), hi = entries.find((e) => e.id === `lab:${pre}${k}`);
+    return fw && fw.status === "confirmed" ? fw : hi || fw || null; };
   const rows = [...(stk?.recent || []).map((r) => ({ ...r, m: "stocks" })), ...(cry?.recent || []).map((r) => ({ ...r, m: "crypto" }))]
     .filter((r) => r.status !== "closed").slice(0, 8);
-  if (!rows.length) return empty("כרגע אין איתותים פתוחים. הם נוצרים כל יום אחרי סגירת המסחר (קריפטו: אחרי חצות).");
+  if (!rows.length) return empty("היום לא נמצא כלום. איתותים נוצרים כל יום אחרי סגירת המסחר (קריפטו: אחרי חצות).");
   const DAY = { stocks: "ימי מסחר", crypto: "ימים" };
-  return h("ul", { class: "picks" }, rows.map((r) => h("li", null,
-    h("a", { class: "sym", href: r.m === "stocks" ? "#/check/" + r.symbol : "#/crypto" }, ltr(r.symbol.replace("-USD", ""))),
-    h("div", null, h("div", null, label(r.m, r.strategy), ((labs[r.m] || {}).strategies || {})[r.strategy]?.side === -1 ? h("span", { class: "badge wait" }, "אזהרה: לא לקנות") : null),
-      h("div", { class: "faint" }, r.status === "open" ? `נכנס ב-${dateHe(r.entry_day)} · יוצא אחרי ${r.hold} ${DAY[r.m]}` : `איתות מ-${dateHe(r.signal_day)} · נכנס בפתיחה הבאה`)),
-    h("span", { class: "badge" }, r.m === "crypto" ? "קריפטו" : "מניות"))));
+  const why = (e) => !e ? "השיטה עוד לא נבדקה על העבר. WAIT."
+    : e.status === "confirmed" ? "השיטה אומתה גם קדימה. שווה לעקוב; כסף אמיתי רק אחרי שיחה ובירור."
+    : e.status === "candidate" ? "השיטה רק מועמדת מהעבר. עוקבים כדי לבדוק אותה, לא כדי לקנות. WAIT."
+    : e.status === "insufficient" ? "אין מספיק נתונים על השיטה הזו. WAIT."
+    : "השיטה נכשלה בבדיקה על העבר. עוקבים רק כדי למדוד. WAIT.";
+  return h("ul", { class: "picks" }, rows.map((r) => { const e = statusOf(r.m, r.strategy);
+    return h("li", null,
+      h("a", { class: "sym", href: r.m === "stocks" ? "#/check/" + r.symbol : "#/crypto" }, ltr(r.symbol.replace("-USD", ""))),
+      h("div", null, h("div", null, label(r.m, r.strategy), " ", sideOf(r.m, r.strategy) === -1 ? h("span", { class: "badge wait" }, "אזהרה: לא לקנות") : null),
+        h("div", { class: "faint" }, r.status === "open" ? `נכנס בכסף מדומה ב-${dateHe(r.entry_day)} · יוצא אחרי ${r.hold} ${DAY[r.m]}` : `איתות מ-${dateHe(r.signal_day)} · נכנס בפתיחה הבאה`),
+        h("div", { class: "why" }, why(e))),
+      e ? stateBadge(e.status) : stateBadge("insufficient")); }));
 }
 PAGES.home = async (view) => {
   if (homeTimer) { clearInterval(homeTimer); homeTimer = null; }
@@ -871,9 +893,9 @@ PAGES.home = async (view) => {
   const go = (ev) => { ev.preventDefault(); const v = q.value.trim().toUpperCase(); if (v) location.hash = "#/check/" + encodeURIComponent(v); };
   const q = h("input", { type: "search", placeholder: "סימול, למשל AMD", "aria-label": "סימול לבדיקה", dir: "auto", autocomplete: "off" });
   const VERDICT = [
-    ["", "היום לא מכניסים כסף.", "אף שיטה עוד לא הוכיחה שהיא מרוויחה יותר מהמדד. הכסף שלך במקום הכי בטוח: בצד, או בקרן מחקה מדד."],
-    ["wait", "יש שיטה שעברה על העבר. עדיין לא מכניסים כסף.", "עכשיו היא צריכה להוכיח את עצמה קדימה, בכסף מדומה, ב-50 עסקאות. זה לוקח כמה שבועות."],
-    ["go", "יש שיטה שעברה את כל הבדיקות.", "זה הרגע לדבר על סכום קטן, עם סטופ, ורק אחרי שבדקנו עמלות ומס. שום דבר לא נקנה אוטומטית."]][stage];
+    ["", "WAIT. היום לא מכניסים כסף.", "אף שיטה עוד לא הוכיחה יתרון. כשאין ראיות, ברירת המחדל היא להמתין."],
+    ["wait", "WAIT. יש השערה, עוד לא הוכחה.", "שיטה עברה בדיקה על העבר. עכשיו היא צריכה 50 עסקאות קדימה בכסף מדומה. זה לוקח כמה שבועות."],
+    ["go", "יש שיטה שאומתה גם קדימה.", "זה הרגע לדבר על סכום קטן, עם סטופ, ורק אחרי בירור עמלות, מס וחוק. שום דבר לא נקנה אוטומטית, ואימות אינו הבטחה לרווח."]][stage];
   const steps = [["נבדקת על 10 שנות עבר", "האם השיטה הייתה מנצחת את המדד אחרי עמלות?"],
     ["50 עסקאות בכסף מדומה", "השיטה בוחרת לפני שהמחיר זז, ואנחנו רואים מה קרה באמת."],
     ["סכום קטן בכסף אמיתי", "רק אחרי שני השלבים. תקבל הודעה בטלגרם."]];
@@ -887,7 +909,7 @@ PAGES.home = async (view) => {
     h("section", { class: "verdict " + VERDICT[0] }, h("div", { class: "when" }, today), h("h2", null, VERDICT[1]), h("p", null, VERDICT[2])),
     card("מתי מכניסים כסף", "כל שיטה עוברת שלושה שלבים. אין קיצורי דרך.", ladder),
     card("מה המערכת חושבת עכשיו", "שורה אחת לכל תחום, מתוך התוצאות האמיתיות", thoughts, h("a", { href: "#/performance" }, "לכל המספרים")),
-    card("מה היא הייתה קונה עכשיו", "בכסף מדומה בלבד. זה תרגול שבודק את השיטות, לא המלצה לקנות.", paperPicks(stk, cry, { stocks: lab?.result, crypto: clab?.result })),
+    card("מה המערכת מצאה היום", "כל ממצא, על איזו שיטה הוא נשען, ולמה לעקוב או להמתין. הכל בכסף מדומה.", paperPicks(stk, cry, { stocks: lab?.result, crypto: clab?.result }, entries)),
     card("הסוכנים עכשיו", "מי עובד, מה הוא מצא, ומתי. מתעדכן לבד כל 30 שניות.", agBox, h("a", { href: "#/agents" }, "לחדר הסוכנים")),
     card("קיבלת טיפ?", "תבדוק אותו לפני הכל. אדום = לא נוגעים.",
       h("form", { class: "quick", onsubmit: go }, q, h("button", { class: "btn primary", type: "submit" }, "בדוק"))),
@@ -989,35 +1011,49 @@ PAGES.stocks = async (view) => {
 PAGES.performance = async (view) => {
   const d = await api("/api/performance").catch(() => null);
   if (current !== "performance") return;
-  if (!d) { view.replaceChildren(empty("לא הצלחתי לקרוא את לוח הביצועים.")); return; }
-  const E = { stocks: "מניות", crypto: "קריפטו", polymarket: "Polymarket", sources: "מקורות טיפים" };
-  const ST = { passed: ["ok", "עבר"], promising: ["wait", "מבטיח"], failed: ["bad", "נכשל"], collecting: ["", "צובר נתונים"] };
-  const KIND = [["forward", "בכסף מדומה, מהיום והלאה", "המבחן שקובע: השיטה בוחרת לפני שהמחיר זז, ואנחנו רואים מה קרה באמת."],
-    ["historical", "על נתוני העבר", "שלב ראשון בלבד. שיטה שעוברת כאן עוברת למבחן בכסף מדומה."],
-    ["measured", "טיפים מקבוצות", "כל טיפ שהגיע נמדד: האם הוא ניצח את S&P 500 אחרי עמלות."]];
-  const sgn = (v, unit) => { if (v == null) return "—"; const r = Number((v * 100).toFixed(2)) || 0; return ltr((r > 0 ? "+" : "") + r.toFixed(2) + "%", r > 0 ? "up" : r < 0 ? "down" : ""); };
-  const S = d.summary || {};
-  const tot = (k) => Object.values(S).reduce((a, x) => a + (x[k] || 0), 0);
-  const passed = d.entries.filter((e) => e.status === "passed");
-  const head = passed.length
-    ? h("section", { class: "verdict go" }, h("h2", null, `${passed.length} עברו את הבדיקות`), h("p", null, passed.map((e) => `${e.label} (${E[e.engine]}, ${e.kind === "forward" ? "קדימה" : e.kind === "historical" ? "על העבר" : "מקור"})`).join(" · ")))
-    : h("section", { class: "verdict" }, h("h2", null, "עוד אין יתרון מוכח באף מנוע."),
-        h("p", null, `${tot("failed")} נכשלו, ${tot("promising")} מבטיחים, ${tot("collecting")} צוברים נתונים. כשמשהו יעבור — הוא יופיע כאן ותקבל הודעה בטלגרם.`));
-  const chips = h("div", { class: "reasons" }, Object.entries(E).map(([k, l]) => { const x = S[k] || {};
-    return h("div", { class: "reason" }, h("div", { class: "k" }, l), h("div", { class: "v" }, `${x.passed || 0} עברו`),
-      h("div", { class: "d" }, `${x.promising || 0} מבטיחים · ${x.failed || 0} נכשלו · ${x.collecting || 0} צוברים`)); }));
-  const order = { passed: 0, promising: 1, collecting: 2, failed: 3 };
-  const table = (rows) => h("div", { class: "scroll-x" }, h("table", { class: "t perf" },
-    h("thead", null, h("tr", null, ["תחום", "שיטה / מקור", "כמה פעמים נבדק", "כמה פעמים הצליח", "רווח ממוצע אחרי עלויות", "בתרחיש פסימי", "מול מה", "מצב"].map((x) => h("th", null, x)))),
-    h("tbody", null, rows.sort((a, b) => order[a.status] - order[b.status] || (b.n || 0) - (a.n || 0)).map((e) => { const [c, l] = ST[e.status] || ["", e.status];
-      return h("tr", null, h("td", null, E[e.engine] || e.engine), h("td", null, e.label, h("div", { class: "faint" }, e.why || "")),
-        h("td", null, ltr(String(e.n ?? 0))), h("td", null, e.success == null ? "—" : ltr(pct(e.success, 0))),
-        h("td", null, sgn(e.mean_net), h("div", { class: "faint" }, e.unit || "")), h("td", null, sgn(e.mean_lo95)),
-        h("td", null, h("span", { class: "faint" }, e.benchmark || "")), h("td", null, h("span", { class: "badge " + c }, l))); }))));
-  view.replaceChildren(h("div", { class: "stack" }, head, chips,
-    ...KIND.map(([k, t, sub]) => { const rows = d.entries.filter((e) => e.kind === k);
-      return card(t, sub, rows.length ? table(rows) : empty(k === "forward" ? "המעקב קדימה מתחיל אחרי ההרצה הראשונה של המעבדה." : "עוד אין תוצאות.")); }),
-    h("p", { class: "faint" }, "כל המספרים אחרי עלויות משוערות. \"ממוצע נטו\" נמדד ביחידה של כל מנוע — אל תשווה מספר של מניות למספר של Polymarket ישירות; השווה את המצב ואת הגבול התחתון.")));
+  if (!d) { view.replaceChildren(empty("לא הצלחתי לקרוא את לוח התוצאות.")); return; }
+  const E = d.entries, C = d.context || {};
+  const signed = (v, dg = 2) => { if (v == null) return "—"; const r = Number((v * 100).toFixed(dg)) || 0;
+    return ltr((r > 0 ? "+" : "") + r.toFixed(dg) + "%", r > 0 ? "up" : r < 0 ? "down" : ""); };
+  const conf = E.filter((e) => e.status === "confirmed");
+  const head = conf.length
+    ? h("section", { class: "verdict go" }, h("h2", null, `${conf.length} אומתו קדימה`), h("p", null, conf.map((e) => `${e.label} (${ENGINE[e.engine]})`).join(" · ") + ". אימות קדימה אינו הבטחה לרווח בכסף אמיתי."))
+    : h("section", { class: "verdict" }, h("h2", null, "WAIT. שום דבר עוד לא אומת קדימה."),
+        h("p", null, `${E.filter((e) => e.status === "candidate").length} השערות מהעבר · ${E.filter((e) => e.status === "validating").length} בבדיקה קדימה · ${E.filter((e) => e.status === "failed").length} נכשלו · ${E.filter((e) => e.status === "insufficient").length} בלי מספיק נתונים.`));
+  const legend = h("details", { class: "more legend" }, h("summary", null, "מה כל מצב אומר"),
+    h("ul", { class: "clean" }, Object.entries(STATE).map(([k, x]) => h("li", null, stateBadge(k), " ", h("span", { class: "faint" }, x.en + " — "), x.d))));
+  const metric = (k, v) => h("div", null, h("div", { class: "k" }, k), h("div", { class: "v" }, v));
+  const KINDNAME = { forward: "קדימה, בכסף מדומה", historical: "על נתוני העבר", measured: "נמדד אחרי שהגיע" };
+  const cardOf = (e) => h("section", { class: "card entry" },
+    h("div", { class: "row-between" }, h("h3", null, e.label), stateBadge(e.status)),
+    h("div", { class: "faint" }, KINDNAME[e.kind] || e.kind, e.period ? [" · ", ltr(e.period)] : "", " · מול ", e.benchmark || "—"),
+    h("p", { class: "why" }, e.why || ""),
+    h("div", { class: "kv" },
+      metric("עסקאות / אירועים", h("span", null, ltr(String(e.n ?? 0)), e.clusters != null ? h("span", { class: "faint" }, ` (${e.clusters} עצמאיים)`) : null)),
+      metric("ניצחו את מדד הייחוס", e.success == null ? "—" : ltr(pct(e.success, 0))),
+      metric("ממוצע נטו", h("span", null, signed(e.mean_net), h("div", { class: "faint" }, e.unit || ""))),
+      metric("גבול תחתון 95%", signed(e.mean_lo95)),
+      metric("רווח / הפסד ממוצע", h("span", null, signed(e.avg_win, 1), " / ", signed(e.avg_loss, 1))),
+      metric("ירידה מרבית", e.max_drawdown == null ? "—" : h("span", null, signed(e.max_drawdown, 1), e.dd_note ? h("div", { class: "faint" }, e.dd_note) : null))),
+    e.sensitivity ? h("details", { class: "more" }, h("summary", null, "רגישות לעמלות (הנחת המודל: " + pct(e.assumed_cost, 1) + ")"),
+      h("table", { class: "t" }, h("thead", null, h("tr", null, ["עמלה הלוך-חזור", "ניצחו את ביטקוין", "ממוצע לעסקה", "מצב"].map((x) => h("th", null, x)))),
+        h("tbody", null, e.sensitivity.map((r) => h("tr", null, h("td", null, ltr(pct(r.cost, 1))), h("td", null, r.success_rate == null ? "—" : ltr(pct(r.success_rate, 0))),
+          h("td", null, signed(r.mean_excess)), h("td", null, stateBadge(r.verdict === "candidate_for_paper" ? "candidate" : r.verdict === "insufficient_data" ? "insufficient" : "failed"))))))) : null,
+    e.missing && e.missing.length ? h("div", { class: "missing" }, h("strong", null, "מה עוד חסר: "), e.missing.join(" · ")) : null,
+    h("div", { class: "faint src" }, e.data || "", e.updated ? " · עודכן " + new Date(e.updated).toLocaleString("he-IL") : ""));
+  const ctx = (k) => { const c = C[k]; if (!c || !c.bench_stats) return null; const b = c.bench_stats;
+    return h("p", { class: "ctx" }, `להשוואה: ${c.bench} בהחזקה פסיבית `, ltr(`${b.from} … ${b.to}`), ": תשואה ", ltr(pct(b.total_return, 0)), ", שנתית ", ltr(pct(b.cagr, 1)), ", תנודתיות ", ltr(pct(b.volatility, 0)), ", ירידה מרבית ", ltr(pct(b.max_drawdown, 0)), ".",
+      c.assumed_cost != null ? ` עמלה מונחת: ${pct(c.assumed_cost, 1)} הלוך-חזור (הנחת מודל).` : ""); };
+  const section = (k) => { const es = E.filter((e) => e.engine === k).sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || (b.n || 0) - (a.n || 0));
+    if (!es.length) return card(ENGINE[k], null, empty(k === "polymarket" ? "המחקר עוד לא רץ." : "INSUFFICIENT DATA: עוד אין תוצאות מהשרת."));
+    const live = es.filter((e) => !["failed", "insufficient"].includes(e.status));
+    const fold = (st, title) => { const xs = es.filter((e) => e.status === st);
+      return xs.length ? h("details", { class: "more" }, h("summary", null, `${title[0]} (${xs.length}) · ${title[1]}`), h("div", { class: "stack" }, xs.map(cardOf))) : null; };
+    return h("section", { class: "engine" }, h("h2", { class: "section-title" }, ENGINE[k], " ", h("span", { class: "faint" }, `${es.length} נבדקו`)), ctx(k),
+      live.length ? h("div", { class: "stack" }, live.map(cardOf)) : h("p", { class: "faint" }, "אין כאן אף השערה פעילה: כל מה שנבדק נכשל או שאין עליו מספיק נתונים."),
+      fold("failed", ["נכשלו", "FAILED"]), fold("insufficient", ["אין מספיק נתונים", "INSUFFICIENT DATA"])); };
+  view.replaceChildren(h("div", { class: "stack" }, head, legend, ...Object.keys(ENGINE).map(section),
+    h("p", { class: "faint" }, "אל תשווה אחוזי הצלחה בין תחומים: במניות זה מול SPY, בקריפטו מול ביטקוין, ב-Polymarket מול מחיר השוק, ובטיפים ל-5 ימים. השווה את המצב, את הגבול התחתון ואת מה שחסר.")));
 };
 
 // ---- Agents room ----

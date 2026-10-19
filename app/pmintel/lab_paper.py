@@ -164,7 +164,12 @@ def summary(rows: list[tuple]) -> dict:
         m, se = L.clustered_mean(xs, [L._week(d) for _, d in v])
         lo = _wilson_lo(k, n)
         confirmed = n >= GATE["min_n"] and k / n >= GATE["win_rate"] and lo > 0.5 and se is not None and m - 1.96 * se > 0
+        wins, losses = [x for x in xs if x > 0], [x for x in xs if x <= 0]
+        days = sorted(d for _, d in v)
         out[name] = {"n": n, "success_rate": k / n, "success_lo95": lo, "mean_excess": m,
+                     "clusters": len({L._week(d) for d in days}), "first_entry": days[0], "last_entry": days[-1],
+                     "avg_win": sum(wins) / len(wins) if wins else None,
+                     "avg_loss": sum(losses) / len(losses) if losses else None,
                      "mean_lo95": (m - 1.96 * se) if se else None,
                      "status": "confirmed" if confirmed else ("collecting" if n < GATE["min_n"] else "not_confirmed")}
     return out

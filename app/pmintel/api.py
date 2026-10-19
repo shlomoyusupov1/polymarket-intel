@@ -396,7 +396,12 @@ def performance():
                + P.from_etf(etf["result"] if etf else None, etf["created_at"] if etf else None)
                + P.from_polymarket(res["result"] if res else None, res["created_at"] if res else None)
                + P.from_tips(board))
-    return {"entries": entries, "summary": P.summarize(entries)}
+    ctx = {}
+    for key, rep, bench in (("stocks", lab, "SPY"), ("crypto", clab, "ביטקוין")):
+        r = (rep or {}).get("result") or {}
+        ctx[key] = {"bench": bench, "bench_stats": r.get("benchmark_stats"), "assumed_cost": r.get("assumed_cost"),
+                    "updated": rep["created_at"] if rep else None, "missing": r.get("missing")}
+    return {"entries": entries, "summary": P.summarize(entries), "context": ctx}
 
 
 SECTOR_ETFS = [("SPY", "S&P 500"), ("QQQ", "נאסד\"ק 100"), ("IWM", "מניות קטנות"), ("XLK", "טכנולוגיה"), ("XLC", "תקשורת"),
