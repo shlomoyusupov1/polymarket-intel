@@ -105,10 +105,10 @@ def settle(conn, feats: dict, spy: list[dict], m: L.Market = L.STOCKS) -> int:
     sidx = {b["day"]: k for k, b in enumerate(spy)}
     changed = 0
     like = "crypto:%"
-    rows = conn.execute("""SELECT id, symbol, signal_day, hold, cost_rt, status FROM lab_signals
+    rows = conn.execute("""SELECT id, symbol, signal_day, hold, cost_rt, status, strategy FROM lab_signals
                            WHERE status IN ('pending', 'open') AND (strategy LIKE %s) = %s""",
                         (like, m.key == "crypto")).fetchall()
-    for rid, sym, sday, hold, cost, status in rows:
+    for rid, sym, sday, hold, cost, status, name in rows:
         f = feats.get(sym)
         if not f:
             continue
@@ -130,9 +130,10 @@ def settle(conn, feats: dict, spy: list[dict], m: L.Market = L.STOCKS) -> int:
                 continue
             r = f["c"][x] / f["o"][e] - 1
             rs = spy[k + hold - 1]["c"] / spy[k]["o"] - 1
+            sd = L.side(name[len(m.prefix):]) if name[len(m.prefix):] in L.STRATEGIES else 1
             conn.execute("""UPDATE lab_signals SET status = 'closed', exit_day = %s, ret = %s, spy_ret = %s,
                             excess = %s, closed_at = now() WHERE id = %s""",
-                         (f["day"][x], r, rs, r - rs - cost, rid))
+                         (f["day"][x], r, rs, sd * (r - rs) - cost, rid))
             changed += 1
     return changed
 

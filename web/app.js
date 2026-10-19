@@ -855,7 +855,7 @@ function paperPicks(stk, cry, labs) {
   const DAY = { stocks: "ימי מסחר", crypto: "ימים" };
   return h("ul", { class: "picks" }, rows.map((r) => h("li", null,
     h("a", { class: "sym", href: r.m === "stocks" ? "#/check/" + r.symbol : "#/crypto" }, ltr(r.symbol.replace("-USD", ""))),
-    h("div", null, h("div", null, label(r.m, r.strategy)),
+    h("div", null, h("div", null, label(r.m, r.strategy), ((labs[r.m] || {}).strategies || {})[r.strategy]?.side === -1 ? h("span", { class: "badge wait" }, "אזהרה: לא לקנות") : null),
       h("div", { class: "faint" }, r.status === "open" ? `נכנס ב-${dateHe(r.entry_day)} · יוצא אחרי ${r.hold} ${DAY[r.m]}` : `איתות מ-${dateHe(r.signal_day)} · נכנס בפתיחה הבאה`)),
     h("span", { class: "badge" }, r.m === "crypto" ? "קריפטו" : "מניות"))));
 }
@@ -1074,12 +1074,12 @@ PAGES.agents = async (view) => {
 // ---- Strategy lab (stocks and crypto share it) ----
 const LABS = {
   stocks: { route: "lab", q: "", bench: "SPY", day: "ימי מסחר", what: "מניות", job: "stocklab",
-    empty: "הריצה הראשונה מורידה 10 שנות מחירים ל-65 מניות ובודקת 8 אסטרטגיות. זה לוקח כמה דקות.",
+    empty: "הריצה הראשונה מורידה 10 שנות מחירים ל-65 מניות ובודקת 15 אסטרטגיות, כולל 7 תבניות נרות. זה לוקח כמה דקות.",
     entry: "קונים בפתיחה של היום שאחרי האיתות, ומוכרים בסגירה אחרי 5, 10 או 20 ימי מסחר.",
     cost: "לכל עסקה יורדת עלות מסחר משוערת של אותה מניה: מרווח קנייה-מכירה לפי טווח המחירים היומי, ועוד 0.1% עמלות.",
     seal: "כל יום אחרי הסגירה נרשמים האיתותים ונחתמים לפני פתיחת המסחר הבא." },
   crypto: { route: "crypto", q: "?market=crypto", bench: "ביטקוין", day: "ימים", what: "מטבעות", job: "cryptolab",
-    empty: "הריצה הראשונה מורידה את כל היסטוריית המחירים של 20 מטבעות גדולים ובודקת 7 אסטרטגיות מול החזקת ביטקוין. בלי ארנק ובלי מפתחות, רק מחירים.",
+    empty: "הריצה הראשונה מורידה את כל היסטוריית המחירים של 20 מטבעות גדולים ובודקת 14 אסטרטגיות, כולל 7 תבניות נרות, מול החזקת ביטקוין. בלי ארנק ובלי מפתחות, רק מחירים.",
     entry: "קריפטו נסחר 24/7, אז יום נסגר בחצות (UTC). קונים יום שלם אחרי האיתות, כדי שאי אפשר יהיה \"לרמות\" עם מחיר שכבר עבר, ומוכרים אחרי 7, 14 או 30 ימים.",
     cost: "לכל עסקה יורדת עלות קבועה של 1% הלוך-חזור, בערך מה שאפליקציה ישראלית או בורסה עם מרווח גובה. אפשר לשנות בשרת (CRYPTO_COST_RT).",
     seal: "כל יום אחרי חצות נרשמים האיתותים ונחתמים לפני הכניסה, יום אחר כך." },
@@ -1113,8 +1113,8 @@ async function labPage(view, market) {
       h("p", { class: "faint" }, v.rule),
       h("div", { class: "kv" },
         h("div", null, h("div", { class: "k" }, "עסקאות מחוץ למדגם"), h("div", { class: "v" }, ltr(String(v.n)))),
-        h("div", null, h("div", { class: "k" }, `ניצחו את ${M.bench} אחרי עלות`), h("div", { class: "v" }, v.success_rate == null ? "—" : ltr(pct(v.success_rate, 0)))),
-        h("div", null, h("div", { class: "k" }, "יתרון לעסקה מעל קנייה אקראית"), h("div", { class: "v" }, signed(v.edge_vs_baseline))),
+        h("div", null, h("div", { class: "k" }, v.side === -1 ? `פיגרו אחרי ${M.bench} (האזהרה צדקה)` : `ניצחו את ${M.bench} אחרי עלות`), h("div", { class: "v" }, v.success_rate == null ? "—" : ltr(pct(v.success_rate, 0)))),
+        h("div", null, h("div", { class: "k" }, v.side === -1 ? "כמה חסכה האזהרה, מעל אקראי" : "יתרון לעסקה מעל קנייה אקראית"), h("div", { class: "v" }, signed(v.edge_vs_baseline))),
         h("div", null, h("div", { class: "k" }, "גבול תחתון (95%)"), h("div", { class: "v" }, signed(v.edge_lo95))),
         h("div", null, h("div", { class: "k" }, "רווח ממוצע / הפסד ממוצע"), h("div", { class: "v" }, h("span", null, signed(v.avg_win, 1), " / ", signed(v.avg_loss, 1)))),
         h("div", null, h("div", { class: "k" }, "עלות ממוצעת לעסקה"), h("div", { class: "v" }, v.avg_cost == null ? "—" : ltr(pct(v.avg_cost, 2))))),
@@ -1122,7 +1122,7 @@ async function labPage(view, market) {
         ltr(y), " ", signed(x.edge_vs_baseline, 1)))) : null,
       v.verdict === "not_supported" && v.edge_lo95 > 0 ? h("p", { class: "faint" }, "הגבול התחתון חיובי, אבל התוצאה לא שורדת את התיקון לכך שנבדקו כמה אסטרטגיות — יכול להיות מזל.") : null,
       v.current_params ? h("p", { class: "faint" }, "הגדרות שנבחרו לשנה האחרונה: ", ltr(Object.entries(v.current_params.params).map(([a, b]) => `${a}=${b}`).join(", ")), `, החזקה ${v.current_params.hold} ${M.day}`) : null,
-      v.signals_today && v.signals_today.length ? h("p", null, "איתות ביום האחרון: ", v.signals_today.map((x, i) => [i ? ", " : "", market === "stocks" ? h("a", { href: "#/check/" + x }, ltr(x)) : ltr(x.replace("-USD", ""))]),
+      v.signals_today && v.signals_today.length ? h("p", null, v.side === -1 ? "אזהרה ביום האחרון: " : "איתות ביום האחרון: ", v.signals_today.map((x, i) => [i ? ", " : "", market === "stocks" ? h("a", { href: "#/check/" + x }, ltr(x)) : ltr(x.replace("-USD", ""))]),
         h("span", { class: "faint" }, v.verdict === "candidate_for_paper" ? " · נכנס למעקב" : " · לא לפעולה — האסטרטגיה לא הוכחה")) : null); };
   const FS = { confirmed: ["ok", "אומתה קדימה"], not_confirmed: ["bad", "לא אומתה"], collecting: ["", "צוברת עסקאות"] };
   const fsum = fp ? fp.summary : {};

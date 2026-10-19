@@ -106,3 +106,44 @@ def test_cross_sectional_ranks_and_calendar_never_look_ahead():
     i = 400
     top = max(full, key=lambda s: full[s]["mom"][i])
     assert full[top]["mom_rank"][i] == 1.0
+
+
+def _bars(ohlc, lead=30, start=100.0, step=-1.0):
+    """`lead` steady bars moving by `step`, then the given (o, h, l, c) bars."""
+    D = days(lead + len(ohlc))
+    out, c = [], start
+    for k in range(lead):
+        o, c = c, c + step
+        out.append({"day": D[k], "o": o, "h": max(o, c) + 0.2, "l": min(o, c) - 0.2, "c": c, "dv": 1e8})
+    for k, (o, h, l, c) in enumerate(ohlc):
+        out.append({"day": D[lead + k], "o": o, "h": h, "l": l, "c": c, "dv": 1e8})
+    return L.features(out)
+
+
+def test_candlestick_patterns_are_recognised():
+    last = lambda f: len(f["c"]) - 1
+    f = _bars([(70.5, 70.6, 66.0, 70.0)])            # falling, then a hammer: long lower wick, tiny upper
+    assert L.signal("candle_hammer", f, last(f), {"k": 2}) and not L.signal("candle_doji", f, last(f), {"d": 0.05})
+    f = _bars([(70.0, 70.5, 69.5, 70.02)])          # falling, then open == close
+    assert L.signal("candle_doji", f, last(f), {"d": 0.05})
+    f = _bars([(71.0, 71.2, 69.8, 70.0), (69.8, 71.6, 69.7, 71.4)])  # red, then green body covering it
+    assert L.signal("candle_bull_engulf", f, last(f), {"trend": False})
+    assert not L.signal("candle_bull_engulf", f, last(f), {"trend": True})  # below its 200-day: needs a long uptrend
+    f = _bars([(72.0, 72.1, 68.0, 68.2), (68.0, 68.6, 67.6, 68.1), (68.3, 71.4, 68.2, 71.2)])
+    assert L.signal("candle_morning_star", f, last(f), {"m": 0.75})
+    f = _bars([(70.0, 71.1, 69.9, 71.0), (70.8, 72.1, 70.7, 72.0), (71.8, 73.1, 71.7, 73.0)])
+    assert L.signal("candle_three_soldiers", f, last(f), {"u": 0.2})
+    up = _bars([(130.0, 134.5, 129.9, 130.4)], start=100.0, step=1.0)  # rising, then a long upper wick
+    assert L.signal("candle_shooting_star", up, last(up), {"k": 2}) and not L.signal("candle_hammer", up, last(up), {"k": 2})
+    up = _bars([(129.0, 130.3, 128.9, 130.2), (130.4, 130.5, 128.6, 128.8)], start=100.0, step=1.0)
+    assert L.signal("candle_bear_engulf", up, last(up), {"trend": False})
+
+
+def test_warning_patterns_score_the_lag_behind_the_benchmark():
+    assert L.side("candle_shooting_star") == -1 and L.side("candle_hammer") == 1
+    b, spy = walk(5, 40), walk(6, 40)
+    f = L.features(b)
+    sidx = L._spy_index(spy)
+    long_, _, cost = L._excess(f, 10, 5, spy, sidx)
+    warn, _, _ = L._excess(f, 10, 5, spy, sidx, sd=-1)
+    assert abs((long_ + cost) + (warn + cost)) < 1e-12  # mirror images before cost; both pay the cost

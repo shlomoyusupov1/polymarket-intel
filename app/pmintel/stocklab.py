@@ -81,7 +81,42 @@ STRATEGIES = {
         "label": "תיקון קצר במגמת עלייה (היפוך לטווח קצר)",
         "rule": "RSI של יומיים מתחת ל-t ומעל ממוצע 200",
         "grid": [{"t": t} for t in (5, 10)]},
+    # ---- candlestick patterns (one bar = one day; "down move" = close below the 20-day average and below 5 days ago)
+    "candle_hammer": {
+        "label": "נר פטיש",
+        "rule": "אחרי ירידה: גוף קטן למעלה, פתיל תחתון ארוך פי k מהגוף, כמעט בלי פתיל עליון",
+        "grid": [{"k": k} for k in (2, 3)]},
+    "candle_bull_engulf": {
+        "label": "נר בולע עולה",
+        "rule": "אחרי ירידה: נר אדום ואחריו נר ירוק שהגוף שלו מכסה את כל הגוף של האדום (ובגרסה השנייה רק מעל ממוצע 200)",
+        "grid": [{"trend": t} for t in (False, True)]},
+    "candle_doji": {
+        "label": "נר דוג'י אחרי ירידה",
+        "rule": "אחרי ירידה: פתיחה וסגירה כמעט באותו מחיר (גוף קטן מ-d מטווח היום)",
+        "grid": [{"d": d} for d in (0.05, 0.1)]},
+    "candle_morning_star": {
+        "label": "כוכב הבוקר (שלושה נרות)",
+        "rule": "אחרי ירידה: נר אדום גדול, נר קטן, ואז נר ירוק שנסגר מעל m מהגוף של האדום",
+        "grid": [{"m": m} for m in (0.5, 0.75)]},
+    "candle_three_soldiers": {
+        "label": "שלושה חיילים לבנים",
+        "rule": "שלושה נרות ירוקים ברצף, כל אחד נסגר גבוה מהקודם וקרוב לשיא היום (פתיל עליון עד u מהטווח)",
+        "grid": [{"u": u} for u in (0.2, 0.35)]},
+    "candle_shooting_star": {
+        "label": "כוכב נופל (נר אזהרה)", "side": -1,
+        "rule": "אחרי עלייה: גוף קטן למטה ופתיל עליון ארוך פי k מהגוף. נבדק כאזהרה: האם אחריו המניה מפגרת אחרי המדד",
+        "grid": [{"k": k} for k in (2, 3)]},
+    "candle_bear_engulf": {
+        "label": "נר בולע יורד (נר אזהרה)", "side": -1,
+        "rule": "אחרי עלייה: נר ירוק ואחריו נר אדום שמכסה את כל הגוף שלו. נבדק כאזהרה: האם אחריו המניה מפגרת אחרי המדד",
+        "grid": [{"trend": t} for t in (False, True)]},
 }
+# Warning patterns (side -1) are scored as "the asset lagged the benchmark after the signal, after cost":
+# what you'd gain by not buying / selling what you hold. No short selling is assumed or placed.
+
+
+def side(name: str) -> int:
+    return STRATEGIES[name].get("side", 1)
 
 
 
@@ -181,7 +216,7 @@ def features(bars: list[dict], m: Market = STOCKS) -> dict:
     hi = [b["h"] for b in bars]
     dv = [b["dv"] for b in bars]
     n = len(bars)
-    f = {"c": c, "o": [b["o"] for b in bars], "h": hi, "dv": dv, "day": [b["day"] for b in bars],
+    f = {"c": c, "o": [b["o"] for b in bars], "h": hi, "l": [b["l"] for b in bars], "dv": dv, "day": [b["day"] for b in bars],
          "ma10": _sma(c, 10), "ma20": _sma(c, 20), "ma50": _sma(c, 50), "ma200": _sma(c, 200),
          "rsi2": _rsi2(c),
          "cost": [m.fixed_cost] * len(bars) if m.fixed_cost is not None else _spread_series(bars)}
@@ -243,7 +278,61 @@ def _near_high(f, i, g):
     return i >= 1 and zone(i) and not zone(i - 1)
 
 
+def _down(f, i):
+    return i >= 5 and f["ma20"][i] is not None and f["c"][i] < f["ma20"][i] and f["c"][i] < f["c"][i - 5]
+
+
+def _up(f, i):
+    return i >= 5 and f["ma20"][i] is not None and f["c"][i] > f["ma20"][i] and f["c"][i] > f["c"][i - 5]
+
+
+def _candle(f, i):
+    """(body, range, upper wick, lower wick, green) of bar i."""
+    o, c, h, l = f["o"][i], f["c"][i], f["h"][i], f["l"][i]
+    return abs(c - o), h - l, h - max(o, c), min(o, c) - l, c > o
+
+
+def candle_signal(name: str, f: dict, i: int, p: dict) -> bool:
+    if i < 6:
+        return False
+    body, rng, up, lo, green = _candle(f, i)
+    if rng <= 0:
+        return False
+    o, c = f["o"], f["c"]
+    if name == "candle_hammer":
+        return _down(f, i) and body > 0 and lo >= p["k"] * body and up <= 0.1 * rng
+    if name == "candle_shooting_star":
+        return _up(f, i) and body > 0 and up >= p["k"] * body and lo <= 0.1 * rng
+    if name == "candle_doji":
+        return _down(f, i) and body <= p["d"] * rng
+    if name in ("candle_bull_engulf", "candle_bear_engulf"):
+        pb = abs(c[i - 1] - o[i - 1])
+        if pb <= 0:
+            return False
+        if name == "candle_bull_engulf":
+            ok = _down(f, i - 1) and c[i - 1] < o[i - 1] and green and o[i] <= c[i - 1] and c[i] >= o[i - 1]
+            return ok and (not p["trend"] or (f["ma200"][i] is not None and c[i] > f["ma200"][i]))
+        ok = _up(f, i - 1) and c[i - 1] > o[i - 1] and c[i] < o[i] and o[i] >= c[i - 1] and c[i] <= o[i - 1]
+        return ok and (not p["trend"] or (f["ma200"][i] is not None and c[i] < f["ma200"][i]))
+    if name == "candle_morning_star":
+        b2, r2, *_ = _candle(f, i - 2)
+        b1, *_ = _candle(f, i - 1)
+        red2 = c[i - 2] < o[i - 2]
+        return (_down(f, i - 2) and red2 and r2 > 0 and b2 >= 0.6 * r2 and b1 <= 0.3 * b2 and green
+                and c[i] >= c[i - 2] + p["m"] * b2)
+    if name == "candle_three_soldiers":
+        for j in (i - 2, i - 1, i):
+            bj, rj, uj, _, gj = _candle(f, j)
+            if not gj or rj <= 0 or uj > p["u"] * rj:
+                return False
+        return (c[i] > c[i - 1] > c[i - 2] and o[i - 1] >= o[i - 2] and o[i - 1] <= c[i - 2]
+                and o[i] >= o[i - 1] and o[i] <= c[i - 1])
+    raise KeyError(name)
+
+
 def signal(name: str, f: dict, i: int, p: dict) -> bool:
+    if name.startswith("candle_"):
+        return candle_signal(name, f, i, p)
     c = f["c"]
     if name == "breakout_volume":
         mx, med, ma = f["max%d" % p["L"]][i], f["dvmed50"][i], f["ma50"][i]
@@ -280,8 +369,9 @@ def _spy_index(spy: list[dict]) -> dict:
     return {b["day"]: (k, b) for k, b in enumerate(spy)}
 
 
-def _excess(f: dict, i: int, hold: int, spy: list[dict], sidx: dict, lag: int = 0) -> tuple | None:
-    """Entry at open of i+1+lag, exit at close of i+hold+lag; the benchmark over the identical bars."""
+def _excess(f: dict, i: int, hold: int, spy: list[dict], sidx: dict, lag: int = 0, sd: int = 1) -> tuple | None:
+    """Entry at open of i+1+lag, exit at close of i+hold+lag; the benchmark over the identical bars.
+    sd=-1 scores a warning signal: positive when the asset lagged the benchmark (cost still paid)."""
     e, x = i + 1 + lag, i + hold + lag
     if x >= len(f["c"]):
         return None
@@ -290,17 +380,17 @@ def _excess(f: dict, i: int, hold: int, spy: list[dict], sidx: dict, lag: int = 
         return None
     r = f["c"][x] / f["o"][e] - 1
     rs = spy[s[0] + hold - 1]["c"] / s[1]["o"] - 1
-    return r - rs - f["cost"][i], f["day"][e], f["cost"][i]
+    return sd * (r - rs) - f["cost"][i], f["day"][e], f["cost"][i]
 
 
 def trades(name: str, p: dict, hold: int, feats: dict, spy: list[dict], sidx: dict, lag: int = 0) -> list[dict]:
-    out = []
+    out, sd = [], side(name)
     for sym, f in feats.items():
         nxt = 0
         for i in range(len(f["c"]) - 1):
             if i < nxt or not signal(name, f, i, p):
                 continue
-            ex = _excess(f, i, hold, spy, sidx, lag)
+            ex = _excess(f, i, hold, spy, sidx, lag, sd)
             if ex is None:
                 continue
             out.append({"sym": sym, "entry": ex[1], "x": ex[0], "cost": ex[2]})
@@ -308,12 +398,12 @@ def trades(name: str, p: dict, hold: int, feats: dict, spy: list[dict], sidx: di
     return out
 
 
-def baseline(feats: dict, hold: int, spy: list[dict], sidx: dict, step: int = 5, lag: int = 0) -> dict[int, float]:
+def baseline(feats: dict, hold: int, spy: list[dict], sidx: dict, step: int = 5, lag: int = 0, sd: int = 1) -> dict[int, float]:
     """Mean net excess of buying any universe stock on any (every `step`-th) day, per entry year."""
     acc: dict[int, list[float]] = {}
     for f in feats.values():
         for i in range(0, len(f["c"]) - 1, step):
-            ex = _excess(f, i, hold, spy, sidx, lag)
+            ex = _excess(f, i, hold, spy, sidx, lag, sd)
             if ex:
                 acc.setdefault(int(ex[1][:4]), []).append(ex[0])
     return {y: sum(v) / len(v) for y, v in acc.items()}
@@ -399,7 +489,7 @@ def walk_forward(name: str, feats: dict, spy: list[dict], m: Market = STOCKS) ->
     sidx = _spy_index(spy)
     spec = STRATEGIES[name]
     combos = [(p, hold) for p in spec["grid"] for hold in m.holds]
-    base = {hold: baseline(feats, hold, spy, sidx, lag=m.lag) for hold in m.holds}
+    base = {hold: baseline(feats, hold, spy, sidx, lag=m.lag, sd=side(name)) for hold in m.holds}
     all_tr = {}
     for p, hold in combos:
         tr = trades(name, p, hold, feats, spy, sidx, m.lag)
@@ -464,7 +554,7 @@ def run(conn=None, fetcher=fetch, symbols=None, pause: float = 0.4, m: Market = 
         wf = walk_forward(name, feats, spy, m)
         s = summarize(wf["oos"])
         last = list(wf["choices"].values())[-1] if wf["choices"] else None
-        res[name] = {"label": spec["label"], "rule": spec["rule"], "grid": spec["grid"], "holds": m.holds,
+        res[name] = {"label": spec["label"], "rule": spec["rule"], "grid": spec["grid"], "holds": m.holds, "side": side(name),
                      "choices": wf["choices"], **s,
                      "signals_today": live_signals(name, feats, last["params"]) if last else [],
                      "current_params": last}
