@@ -22,7 +22,7 @@ import math
 from collections import defaultdict
 from datetime import timedelta
 
-from .research import BUCKETS, STRATEGIES, strategy
+from .research import BUCKETS, STRATEGIES, strategy, trade_return
 
 EPS = 1e-4
 ALPHA = 20.0  # shrinkage of bucket frequencies toward the bucket's mean price
@@ -145,8 +145,8 @@ def walk_forward(rows: list[dict], horizon_h: int, slippage: float, fee: float, 
                     price = r["p"] if side == "YES" else 1 - r["p"]
                     won = r["y"] == 1 if side == "YES" else r["y"] == 0
                     e = r["event_id"] or r["market_id"]
-                    oos_ret[e].append((1.0 if won else 0.0) / min(price + slippage, 0.999) - 1 - fee)
-                    oos_ret_2x[e].append((1.0 if won else 0.0) / min(price + 2 * slippage, 0.999) - 1 - fee)
+                    oos_ret[e].append(trade_return(won, price, slippage, fee, r.get("category")))
+                    oos_ret_2x[e].append(trade_return(won, price, 2 * slippage, fee, r.get("category")))
             fold["oos"] = strategy(test, side, lo, hi, slippage, fee)
         res["folds"].append(fold)
 

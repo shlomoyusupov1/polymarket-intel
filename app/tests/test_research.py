@@ -30,8 +30,11 @@ def test_wilson_bounds():
 
 def test_strategy_returns_include_slippage():
     # Buy NO at p=0.04 -> NO price 0.96 + 0.01 slippage = 0.97; NO wins -> 1/0.97 - 1
-    s = strategy(rows([(0.04, 0, "a")]), "NO", 0.0, 0.05, slippage=0.01, fee=0.0)
+    s = strategy(rows([(0.04, 0, "a")]), "NO", 0.0, 0.05, slippage=0.01, fee=0.0, taker=False)
     assert math.isclose(s["mean_return"], 1 / 0.97 - 1)
+    # with the default 5% taker rate the winner keeps 1 - 0.05 x 0.03 of its shares
+    s = strategy(rows([(0.04, 0, "a")]), "NO", 0.0, 0.05, slippage=0.01, fee=0.0)
+    assert math.isclose(s["mean_return"], (1 - 0.05 * 0.03) / 0.97 - 1)
     assert s["trades"] == 1 and s["events"] == 1 and s["insample_ci_positive"] is False
 
 
@@ -43,7 +46,7 @@ def test_strategy_losing_trade_is_minus_100pct():
 def test_correlated_markets_count_once_per_event():
     # 50 winning markets of one event + 1 losing market of another event
     spec = [(0.03, 0, "big")] * 50 + [(0.03, 1, "small")]
-    s = strategy(rows(spec), "NO", 0.0, 0.05, slippage=0.0, fee=0.0)
+    s = strategy(rows(spec), "NO", 0.0, 0.05, slippage=0.0, fee=0.0, taker=False)
     assert s["trades"] == 51 and s["events"] == 2
     expected = ((1 / 0.97 - 1) + (-1.0)) / 2
     assert math.isclose(s["mean_return"], expected)
@@ -133,3 +136,18 @@ def test_partial_backfill_is_not_marked_complete():
     assert conn.execute("SELECT status FROM job_runs WHERE job='backfill' ORDER BY id DESC").fetchone()[0] == "ok"
     assert conn.execute("SELECT source FROM price_history WHERE token_id='t2'").fetchone()[0] == "data_api_v2"
     conn.close()
+
+
+def test_taker_fee_follows_polymarket_schedule():
+    from pmintel import research as R
+    # docs example: 100 crypto shares at $0.50 pay $1.75 -> 3.5% of the $50 stake
+    assert abs(R.taker_fee_frac(0.5, "Crypto") * 50 - 1.75) < 1e-9
+    assert abs(R.taker_fee_frac(0.10, "Politics") - 0.036) < 1e-12   # longshots are expensive to buy
+    assert abs(R.taker_fee_frac(0.95, "US Politics") - 0.002) < 1e-12
+    assert R.taker_fee_frac(0.5, "Geopolitics") == 0.0
+    assert R.taker_rate(None) == R.DEFAULT_TAKER_RATE
+    # a fair coin bought at 50c (+1c slippage) loses the slippage AND the fee
+    r_win = R.trade_return(True, 0.5, 0.01, 0.0, "Sports")
+    assert abs(r_win - ((1 - 0.05 * 0.49) / 0.51 - 1)) < 1e-12
+    assert R.trade_return(False, 0.5, 0.01, 0.0, "Sports") == -1.0  # a loser loses the stake, no more
+    assert R.trade_return(True, 0.5, 0.01, 0.0, "Sports", taker=False) > r_win

@@ -355,6 +355,69 @@ def lab_paper():
             "gate": P.GATE}
 
 
+@app.get("/api/performance")
+def performance():
+    """Every strategy and source on one scoreboard: historical tests, forward paper, measured sources."""
+    from . import lab_paper as LP, performance as P, tips as T
+    lab = lab_latest()
+    etf = etf_latest()
+    res = research_latest()
+    with db.connect() as c:
+        board = T.leaderboard(c)
+        try:
+            closed = c.execute("SELECT strategy, excess, entry_day FROM lab_signals WHERE status = 'closed'").fetchall()
+        except Exception:  # noqa: BLE001 - forward table not created yet
+            closed = []
+    entries = (P.from_stocklab(lab["result"] if lab else None, lab["created_at"] if lab else None)
+               + P.from_lab_forward(LP.summary(closed), lab["result"] if lab else None)
+               + P.from_etf(etf["result"] if etf else None, etf["created_at"] if etf else None)
+               + P.from_polymarket(res["result"] if res else None, res["created_at"] if res else None)
+               + P.from_tips(board))
+    return {"entries": entries, "summary": P.summarize(entries)}
+
+
+SECTOR_ETFS = [("SPY", "S&P 500"), ("QQQ", "נאסד\"ק 100"), ("IWM", "מניות קטנות"), ("XLK", "טכנולוגיה"), ("XLC", "תקשורת"),
+               ("XLY", "צריכה מחזורית"), ("XLF", "פיננסים"), ("XLV", "בריאות"), ("XLI", "תעשייה"), ("XLE", "אנרגיה"),
+               ("XLP", "צריכה בסיסית"), ("XLU", "תשתיות"), ("XLB", "חומרים"), ("XLRE", "נדל\"ן")]
+
+
+@app.get("/api/stocks/overview")
+def stocks_overview():
+    """Market and sector snapshot from daily bars (1-hour cache). Prices only, no forecasts."""
+    from . import stockcheck
+
+    def one(sym):
+        bars, _ = cached(("bars1y", sym), 3600, lambda: stockcheck.fetch(sym))
+        c = [b["c"] for b in bars]
+        if len(c) < 30:
+            return None
+        ret = lambda n: c[-1] / c[-1 - n] - 1 if len(c) > n else None
+        ytd = [b for b in bars if b["day"][:4] == bars[-1]["day"][:4]]
+        ma200 = sum(c[-200:]) / 200 if len(c) >= 200 else None
+        return {"day": bars[-1]["day"], "close": c[-1], "r1w": ret(5), "r1m": ret(21), "r3m": ret(63),
+                "r1y": ret(len(c) - 1), "ytd": c[-1] / ytd[0]["o"] - 1 if ytd else None,
+                "above_ma200": (c[-1] > ma200) if ma200 else None}
+    rows, missing = [], []
+    for sym, name in SECTOR_ETFS:
+        try:
+            r = one(sym)
+        except Exception:  # noqa: BLE001
+            r = None
+        (rows.append({"symbol": sym, "name": name, **r}) if r else missing.append(sym))
+    spy = next((r for r in rows if r["symbol"] == "SPY"), None)
+    for r in rows:
+        r["vs_spy_3m"] = (r["r3m"] - spy["r3m"]) if spy and r["r3m"] is not None and spy["r3m"] is not None else None
+    signals = q("""SELECT strategy, symbol, signal_day, status, entry_day, excess FROM lab_signals
+                   WHERE status IN ('pending', 'open') ORDER BY signal_day DESC LIMIT 30""") if _has_table("lab_signals") else []
+    sec = q("""SELECT symbol, accepted, value, title FROM sec_buys ORDER BY accepted DESC LIMIT 8""") if _has_table("sec_buys") else []
+    return {"etfs": rows, "missing": missing, "signals": signals, "sec_buys": sec,
+            "source": "Yahoo Finance daily bars (cached 1 h)"}
+
+
+def _has_table(name: str) -> bool:
+    return bool(q("SELECT to_regclass(%s) AS t", (name,))[0]["t"])
+
+
 @app.get("/api/integration/latest")
 def integration_latest():
     rows = q("""SELECT id, created_at, result FROM research_reports

@@ -60,11 +60,42 @@ def calibration(rows: list[dict]) -> dict:
     return {"n": n, "brier": brier, "log_loss": ll, "buckets": buckets}
 
 
+# Polymarket taker fee (docs.polymarket.com/trading/fees, in force for new markets since 2026-03-30):
+# fee = shares x feeRate x p x (1 - p)  ->  as a share of the stake (shares x p): feeRate x (1 - p).
+# Cheap contracts are expensive to buy: at 10 cents a 4% rate costs 3.6% of the stake.
+TAKER_RATES = {"geopolit": 0.0, "world": 0.0, "crypto": 0.07, "sports": 0.05, "finance": 0.04, "politic": 0.04, "election": 0.04,
+               "econom": 0.05, "culture": 0.05, "pop": 0.05, "weather": 0.05, "mention": 0.04,
+               "tech": 0.04, "science": 0.04, "geopolit": 0.0, "world": 0.0}
+DEFAULT_TAKER_RATE = 0.05  # "Other / General"
+
+
+def taker_rate(category: str | None) -> float:
+    c = (category or "").lower()
+    for key, rate in TAKER_RATES.items():
+        if key in c:
+            return rate
+    return DEFAULT_TAKER_RATE
+
+
+def taker_fee_frac(price: float, category: str | None) -> float:
+    """Taker fee as a fraction of the amount staked when buying at `price`."""
+    return taker_rate(category) * (1 - min(max(price, 0.0), 1.0))
+
+
+def trade_return(won: bool, price: float, slippage: float, fee: float, category: str | None, taker: bool = True) -> float:
+    """Per $1 staked. The taker fee is taken in shares at the buy, so it shrinks the payoff of a winner
+    and a loser still loses exactly the stake. Applied to every historical market too, even ones that
+    predate the fee: conservative, and what the same trade would pay today. `fee` is an extra flat cost."""
+    cost = min(price + slippage, 0.999)
+    kept = 1 - (taker_fee_frac(cost, category) if taker else 0.0)
+    return (kept if won else 0.0) / cost - 1 - fee
+
+
 def strategy(rows: list[dict], side: str, lo: float, hi: float,
-             slippage: float, fee: float) -> dict:
+             slippage: float, fee: float, taker: bool = True) -> dict:
     """Buy `side` ('YES'=ref outcome, 'NO'=complement) on every market whose price is in [lo, hi).
 
-    Return per $1 staked = payoff/cost - 1 - fee, where cost includes slippage.
+    Return per $1 staked = payoff/cost - 1 - fee - taker fee, where cost includes slippage.
     """
     per_event: dict[str, list[float]] = defaultdict(list)
     wins = trades = 0
@@ -72,9 +103,8 @@ def strategy(rows: list[dict], side: str, lo: float, hi: float,
         if not (lo <= r["p"] < hi):
             continue
         price = r["p"] if side == "YES" else 1 - r["p"]
-        cost = min(price + slippage, 0.999)
         won = r["y"] == 1 if side == "YES" else r["y"] == 0
-        ret = (1.0 if won else 0.0) / cost - 1 - fee
+        ret = trade_return(won, price, slippage, fee, r.get("category"), taker)
         per_event[r["event_id"] or r["market_id"]].append(ret)
         trades += 1
         wins += won
@@ -157,6 +187,7 @@ def run(conn) -> dict:
     from . import db
     from .walkforward import walk_forward
     params = {"horizons_h": HORIZONS_H, "slippage": config.RESEARCH_SLIPPAGE, "fee": config.RESEARCH_FEE,
+              "taker_fee": "feeRate x (1 - price) of stake, rate by category (Polymarket fee schedule 2026)",
               "max_staleness_h": MAX_STALENESS.total_seconds() / 3600}
     with db.job_run(conn, "research") as run_state:
         result = {}
