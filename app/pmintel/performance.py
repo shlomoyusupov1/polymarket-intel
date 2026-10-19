@@ -3,7 +3,7 @@
 Each entry has the same fields so the evidence can be compared without pretending a contract's
 probability and a stock's return are the same thing:
 
-  engine     stocks | polymarket | sources
+  engine     stocks | crypto | polymarket | sources
   kind       historical  — tested on past data, out of sample (can never prove executability)
              forward     — signals recorded before the fact, paper money, real prices
              measured    — someone else's calls, measured after the fact
@@ -36,46 +36,53 @@ def _e(**kw) -> dict:
     return base
 
 
-def from_stocklab(report: dict | None, updated=None) -> list[dict]:
+BENCH = {"stocks": "SPY", "crypto": "ביטקוין"}
+UNIT = {"stocks": "מניות", "crypto": "מטבעות"}
+
+
+def from_stocklab(report: dict | None, updated=None, engine: str = "stocks") -> list[dict]:
     if not report:
         return []
-    out = []
+    out, b = [], BENCH[engine]
+    pre = "" if engine == "stocks" else engine + ":"
     for k, v in (report.get("strategies") or {}).items():
-        out.append(_e(engine="stocks", kind="historical", id=f"lab:{k}", label=v.get("label", k), version="stocklab_v1",
+        out.append(_e(engine=engine, kind="historical", id=f"lab:{pre}{k}", label=v.get("label", k),
+                      version=f"{'stock' if engine == 'stocks' else engine}lab_v1",
                       updated=updated, data=f"Yahoo daily, {report.get('first_day')}…{report.get('last_day')}, "
-                      f"{len(report.get('universe') or [])} stocks",
+                      f"{len(report.get('universe') or [])} {UNIT[engine]}",
                       n=v.get("n"), success=v.get("success_rate"), mean_net=v.get("edge_vs_baseline"),
                       mean_lo95=v.get("edge_lo95"), unit="לעסקה, מעל קנייה אקראית",
-                      benchmark="SPY + קנייה אקראית", verdict=v.get("verdict"),
-                      why=_lab_why(v)))
+                      benchmark=f"{b} + קנייה אקראית", verdict=v.get("verdict"),
+                      why=_lab_why(v, b)))
     return out
 
 
-def _lab_why(v: dict) -> str:
+def _lab_why(v: dict, bench: str = "SPY") -> str:
     if v.get("verdict") == "insufficient_data":
         return f"רק {v.get('n') or 0} עסקאות מחוץ למדגם (צריך 50)"
     if v.get("verdict") == "candidate_for_paper":
-        return "ניצחה את SPY ואת הקנייה האקראית מחוץ למדגם, ושרדה את התיקון לריבוי בדיקות"
+        return f"ניצחה את {bench} ואת הקנייה האקראית מחוץ למדגם, ושרדה את התיקון לריבוי בדיקות"
     if (v.get("edge_lo95") or 0) > 0:
         return "גבול תחתון חיובי, אבל " + ("מתחת ל-60% הצלחה" if v.get("verdict") == "edge_below_target"
                                                else "לא אחרי התיקון לבדיקת כמה אסטרטגיות")
     return "אין יתרון על קנייה אקראית אחרי עלויות"
 
 
-def from_lab_forward(summary: dict, lab_report: dict | None) -> list[dict]:
+def from_lab_forward(summary: dict, lab_report: dict | None, engine: str = "stocks") -> list[dict]:
     st = (lab_report or {}).get("strategies") or {}
-    out = []
+    out, b = [], BENCH[engine]
+    pre = "" if engine == "stocks" else engine + ":"
     for k, v in summary.items():
         verdict = v["status"]
-        why = {"confirmed": "50+ עסקאות קדימה, 60%+ ניצחו את SPY אחרי עלות, גבול תחתון חיובי",
+        why = {"confirmed": f"50+ עסקאות קדימה, 60%+ ניצחו את {b} אחרי עלות, גבול תחתון חיובי",
                "not_confirmed": "50+ עסקאות קדימה, אבל השער לא הושג",
                "collecting": f"{v['n']} עסקאות קדימה עד עכשיו (צריך 50)"}[verdict]
         if verdict == "confirmed" and st.get(k, {}).get("verdict") != "candidate_for_paper":
             verdict, why = "edge_below_target", "חיובית קדימה, אבל נכשלה בבדיקה על העבר"
-        out.append(_e(engine="stocks", kind="forward", id=f"fwd:{k}", label=st.get(k, {}).get("label", k),
-                      version="lab_paper", data="signals sealed before the next open; Yahoo daily",
+        out.append(_e(engine=engine, kind="forward", id=f"fwd:{pre}{k}", label=st.get(k, {}).get("label", k),
+                      version="lab_paper", data="signals sealed before the entry; Yahoo daily",
                       n=v["n"], success=v["success_rate"], mean_net=v["mean_excess"], mean_lo95=v["mean_lo95"],
-                      unit="לעסקה, מול SPY", benchmark="SPY באותם ימים", verdict=verdict, why=why))
+                      unit=f"לעסקה, מול {b}", benchmark=f"{b} באותם ימים", verdict=verdict, why=why))
     return out
 
 

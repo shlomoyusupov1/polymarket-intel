@@ -60,3 +60,16 @@ def test_performance_and_stocks_endpoints(monkeypatch):
         assert len(s["etfs"]) == len(api.SECTOR_ETFS) and not s["missing"]
         spy = next(r for r in s["etfs"] if r["symbol"] == "SPY")
         assert abs(spy["r1w"] - (bars[-1]["c"] / bars[-6]["c"] - 1)) < 1e-12 and spy["above_ma200"] is True
+
+
+def test_crypto_entries_are_their_own_engine():
+    from pmintel import performance as P
+    rep = {"market": "crypto", "first_day": "2018-01-01", "last_day": "2026-10-18", "universe": ["BTC-USD"],
+           "strategies": {"rsi2_pullback": {"label": "x", "n": 80, "verdict": "candidate_for_paper", "success_rate": 0.62}}}
+    e = P.from_stocklab(rep, None, "crypto")[0]
+    assert e["engine"] == "crypto" and e["id"] == "lab:crypto:rsi2_pullback" and e["status"] == "passed"
+    assert "ביטקוין" in e["benchmark"] and e["version"] == "cryptolab_v1"
+    f = P.from_lab_forward({"rsi2_pullback": {"n": 3, "success_rate": 1.0, "mean_excess": 0.01, "mean_lo95": None,
+                                             "status": "collecting"}}, rep, "crypto")[0]
+    assert f["engine"] == "crypto" and f["id"] == "fwd:crypto:rsi2_pullback" and f["status"] == "collecting"
+    assert P.from_stocklab(rep)[0]["version"] == "stocklab_v1"

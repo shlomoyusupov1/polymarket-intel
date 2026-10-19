@@ -321,6 +321,11 @@ def agents_room():
         st = (lab["result"] or {}).get("strategies") or {}
         cands = [v["label"] for v in st.values() if v.get("verdict") == "candidate_for_paper"]
         f["lab_line"] = (f"{len(cands)} מועמדות: " + ", ".join(cands)) if cands else f"0 מתוך {len(st)} אסטרטגיות עברו"
+    clab = lab_latest("crypto")
+    if clab:
+        st = (clab["result"] or {}).get("strategies") or {}
+        cands = [v["label"] for v in st.values() if v.get("verdict") == "candidate_for_paper"]
+        f["crypto_line"] = (f"{len(cands)} מועמדות: " + ", ".join(cands)) if cands else f"0 מתוך {len(st)} אסטרטגיות עברו מול ביטקוין"
     hm = q("SELECT * FROM host_metrics ORDER BY ts DESC LIMIT 1")
     if hm:
         h = hm[0]
@@ -335,31 +340,47 @@ def agents_room():
     return {"agents": A.build(jobs, f), "feed": feed}
 
 
+def _market(name: str):
+    from . import cryptolab, stocklab
+    if name not in ("stocks", "crypto"):
+        raise HTTPException(400, "market must be stocks or crypto")
+    return cryptolab.CRYPTO if name == "crypto" else stocklab.STOCKS
+
+
 @app.get("/api/lab/latest")
-def lab_latest():
+def lab_latest(market: str = "stocks"):
+    m = _market(market)
     rows = q("""SELECT id, created_at, result FROM research_reports
-                WHERE kind = 'stocklab_v1' ORDER BY id DESC LIMIT 1""")
+                WHERE kind = %s ORDER BY id DESC LIMIT 1""", (m.report_kind,))
     return rows[0] if rows else None
 
 
 @app.get("/api/lab/paper")
-def lab_paper():
-    """Forward paper record of the lab strategies (signals sealed before the next open)."""
+def lab_paper(market: str = "stocks"):
+    """Forward paper record of the lab strategies (signals sealed before the entry)."""
     from . import lab_paper as P
+    m = _market(market)
+    like, want = "crypto:%", m.key == "crypto"
     with db.connect() as c:
         closed = c.execute("SELECT strategy, excess, entry_day FROM lab_signals WHERE status = 'closed'").fetchall()
     rows = q("""SELECT strategy, symbol, signal_day, recorded_at, hold, status, entry_day, entry_price, exit_day,
-                       ret, spy_ret, excess, cost_rt, lab_verdict FROM lab_signals ORDER BY signal_day DESC, id DESC LIMIT 60""")
-    first = q("SELECT min(signal_day) AS first_day, count(*) AS total FROM lab_signals")[0]
-    return {"summary": P.summary(closed), "recent": rows, "first_day": first["first_day"], "total": first["total"],
-            "gate": P.GATE}
+                       ret, spy_ret, excess, cost_rt, lab_verdict FROM lab_signals WHERE (strategy LIKE %s) = %s
+                ORDER BY signal_day DESC, id DESC LIMIT 60""", (like, want))
+    for r in rows:
+        r["strategy"] = r["strategy"][len(m.prefix):]
+    first = q("""SELECT min(signal_day) AS first_day, count(*) AS total FROM lab_signals
+                 WHERE (strategy LIKE %s) = %s""", (like, want))[0]
+    return {"summary": P.summary(P.split(closed, m)), "recent": rows, "first_day": first["first_day"],
+            "total": first["total"], "gate": P.GATE, "market": m.key, "benchmark": m.bench_label}
 
 
 @app.get("/api/performance")
 def performance():
     """Every strategy and source on one scoreboard: historical tests, forward paper, measured sources."""
     from . import lab_paper as LP, performance as P, tips as T
+    from .cryptolab import CRYPTO
     lab = lab_latest()
+    clab = lab_latest("crypto")
     etf = etf_latest()
     res = research_latest()
     with db.connect() as c:
@@ -369,7 +390,9 @@ def performance():
         except Exception:  # noqa: BLE001 - forward table not created yet
             closed = []
     entries = (P.from_stocklab(lab["result"] if lab else None, lab["created_at"] if lab else None)
-               + P.from_lab_forward(LP.summary(closed), lab["result"] if lab else None)
+               + P.from_lab_forward(LP.summary(LP.split(closed)), lab["result"] if lab else None)
+               + P.from_stocklab(clab["result"] if clab else None, clab["created_at"] if clab else None, "crypto")
+               + P.from_lab_forward(LP.summary(LP.split(closed, CRYPTO)), clab["result"] if clab else None, "crypto")
                + P.from_etf(etf["result"] if etf else None, etf["created_at"] if etf else None)
                + P.from_polymarket(res["result"] if res else None, res["created_at"] if res else None)
                + P.from_tips(board))
@@ -408,7 +431,7 @@ def stocks_overview():
     for r in rows:
         r["vs_spy_3m"] = (r["r3m"] - spy["r3m"]) if spy and r["r3m"] is not None and spy["r3m"] is not None else None
     signals = q("""SELECT strategy, symbol, signal_day, status, entry_day, excess FROM lab_signals
-                   WHERE status IN ('pending', 'open') ORDER BY signal_day DESC LIMIT 30""") if _has_table("lab_signals") else []
+                   WHERE status IN ('pending', 'open') AND strategy NOT LIKE 'crypto:%%' ORDER BY signal_day DESC LIMIT 30""") if _has_table("lab_signals") else []
     sec = q("""SELECT symbol, accepted, value, title FROM sec_buys ORDER BY accepted DESC LIMIT 8""") if _has_table("sec_buys") else []
     return {"etfs": rows, "missing": missing, "signals": signals, "sec_buys": sec,
             "source": "Yahoo Finance daily bars (cached 1 h)"}

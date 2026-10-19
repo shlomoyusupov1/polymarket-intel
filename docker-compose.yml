@@ -118,6 +118,14 @@ services:
     restart: "no"
     profiles: ["jobs"]
 
+  # Same lab on 20 large coins vs holding bitcoin (prices only; no wallet, no keys)
+  cryptolab:
+    <<: *app
+    entrypoint: ["python", "-m", "pmintel.cryptolab"]
+    command: []
+    restart: "no"
+    profiles: ["jobs"]
+
 volumes:
   tgdata:
   dbdata:

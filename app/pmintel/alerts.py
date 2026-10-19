@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 NAMES = {"collect": "איסוף Polymarket", "collect_full": "סריקה מלאה", "orderbooks": "ספרי פקודות",
          "sync_closed": "סנכרון שווקים שנסגרו", "sec_insider": "קניות מנהלים (SEC)", "sec_events": "13D ודוחות (SEC)",
          "etf_paper": "חדר המסחר", "lab_paper": "מעקב המעבדה", "stocklab": "מעבדת האסטרטגיות",
+         "cryptolab": "מעבדת הקריפטו", "crypto_paper": "מעקב הקריפטו",
          "research": "מחקר Polymarket", "backfill": "Backfill היסטורי"}
 STALE = {"collect": timedelta(minutes=45), "orderbooks": timedelta(minutes=90), "sec_insider": timedelta(hours=18)}
 
@@ -49,6 +50,11 @@ def good_news(facts: dict) -> dict[str, str]:
     out = {}
     for name, label in facts.get("lab_candidates", []):
         out[f"good:lab:{name}"] = f"המעבדה: \"{label}\" עברה את הבדיקה על 10 שנים. מתחיל מעקב קדימה בכסף מדומה."
+    for name, label in facts.get("crypto_candidates", []):
+        out[f"good:crypto:{name}"] = f"קריפטו: \"{label}\" ניצחה את ביטקוין בבדיקה על העבר. מתחיל מעקב קדימה בכסף מדומה."
+    for name, label in facts.get("crypto_confirmed", []):
+        out[f"good:cryptofwd:{name}"] = (f"קריפטו: \"{label}\" אומתה גם קדימה (50+ עסקאות, 60%+ ניצחו את ביטקוין אחרי עלויות). "
+                                        "זה הרגע לדבר על סכום קטן — אחרי בירור חוקי ומס.")
     for name, label in facts.get("forward_confirmed", []):
         out[f"good:forward:{name}"] = (f"\"{label}\" אומתה גם קדימה (50+ עסקאות, 60%+ ניצחו את SPY אחרי עלויות). "
                                       "זה הרגע לדבר על כסף אמיתי וקטן — עם סטופ ו-1%–2% סיכון לעסקה.")
@@ -103,14 +109,20 @@ def gather(conn) -> tuple[dict, dict]:
     lab = conn.execute("SELECT result FROM research_reports WHERE kind = 'stocklab_v1' ORDER BY id DESC LIMIT 1").fetchone()
     st = (lab[0] or {}).get("strategies", {}) if lab else {}
     facts["lab_candidates"] = [(k, v.get("label", k)) for k, v in st.items() if v.get("verdict") == "candidate_for_paper"]
+    clab = conn.execute("SELECT result FROM research_reports WHERE kind = 'cryptolab_v1' ORDER BY id DESC LIMIT 1").fetchone()
+    cst = (clab[0] or {}).get("strategies", {}) if clab else {}
+    facts["crypto_candidates"] = [(k, v.get("label", k)) for k, v in cst.items() if v.get("verdict") == "candidate_for_paper"]
     try:
         from . import lab_paper
+        from .cryptolab import CRYPTO
         closed = conn.execute("SELECT strategy, excess, entry_day FROM lab_signals WHERE status = 'closed'").fetchall()
-        fwd = lab_paper.summary(closed)
-        facts["forward_confirmed"] = [(k, st.get(k, {}).get("label", k)) for k, v in fwd.items()
-                                      if v["status"] == "confirmed" and st.get(k, {}).get("verdict") == "candidate_for_paper"]
+        for key, lab_st, rows in (("forward_confirmed", st, lab_paper.split(closed)),
+                                  ("crypto_confirmed", cst, lab_paper.split(closed, CRYPTO))):
+            fwd = lab_paper.summary(rows)
+            facts[key] = [(k, lab_st.get(k, {}).get("label", k)) for k, v in fwd.items()
+                          if v["status"] == "confirmed" and lab_st.get(k, {}).get("verdict") == "candidate_for_paper"]
     except Exception:  # noqa: BLE001 - table absent before the forward tracker is deployed
-        facts["forward_confirmed"] = []
+        facts["forward_confirmed"], facts["crypto_confirmed"] = [], []
     from . import tips
     facts["reliable_sources"] = [b["source"] for b in tips.leaderboard(conn) if b["gate"]["status"] == "reliable"]
     return jobs, facts
@@ -146,11 +158,17 @@ def digest_text(conn, now: datetime) -> str:
         line = f"• מעבדה: {len(cands)} מתוך {len(st)} אסטרטגיות עברו על העבר"
         try:
             o, c = conn.execute("""SELECT count(*) FILTER (WHERE status IN ('pending', 'open')),
-                                          count(*) FILTER (WHERE status = 'closed') FROM lab_signals""").fetchone()
+                                          count(*) FILTER (WHERE status = 'closed') FROM lab_signals
+                                   WHERE strategy NOT LIKE 'crypto:%'""").fetchone()
             line += f" · מעקב קדימה: {o} פתוחות, {c} נסגרו"
         except Exception:  # noqa: BLE001 - forward tracker not deployed yet
             pass
         lines.append(line)
+    clab = conn.execute("SELECT result FROM research_reports WHERE kind = 'cryptolab_v1' ORDER BY id DESC LIMIT 1").fetchone()
+    if clab:
+        st = (clab[0] or {}).get("strategies", {})
+        cands = [v.get("label", k) for k, v in st.items() if v.get("verdict") == "candidate_for_paper"]
+        lines.append(f"• קריפטו: {len(cands)} מתוך {len(st)} אסטרטגיות ניצחו את ביטקוין על העבר")
     etf = conn.execute("SELECT result FROM research_reports WHERE kind = 'etf_paper_v2' ORDER BY id DESC LIMIT 1").fetchone()
     if etf and (etf[0] or {}).get("accounts"):
         acc = etf[0]["accounts"]
