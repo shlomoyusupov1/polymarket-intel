@@ -23,10 +23,17 @@ function s(tag, attrs, ...kids) {
   for (const c of kids.flat(Infinity)) if (c != null) el.append(c instanceof Node ? c : document.createTextNode(String(c)));
   return el;
 }
-async function api(path) {
-  const r = await fetch(path, { headers: { Accept: "application/json" } });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+async function api(path, ms = 20000) {
+  // never leave a page spinning forever: a server that doesn't answer becomes a visible error
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(path, { headers: { Accept: "application/json" }, signal: ctl.signal });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } catch (e) {
+    throw e.name === "AbortError" ? new Error("השרת לא ענה תוך " + ms / 1000 + " שניות") : e;
+  } finally { clearTimeout(t); }
 }
 const num = (v) => v == null || isNaN(v) ? null : Number(v);
 const usd = (v) => num(v) == null ? "—" : "$" + Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(v);
@@ -792,6 +799,7 @@ PAGES.home = async (view) => {
   const [t, perf, ov] = await Promise.all([api("/api/tips").catch(() => null), api("/api/performance").catch(() => null),
     api("/api/overview").catch(() => null)]);
   if (current !== "home") return;
+  if (!t && !perf && !ov) throw new Error("השרת לא מחזיר נתונים כרגע. נסה לרענן בעוד דקה.");
   const entries = perf ? perf.entries : [];
   const passed = entries.filter((e) => e.status === "passed" && e.kind === "forward");
   const tested = entries.filter((e) => e.engine !== "sources").length;
