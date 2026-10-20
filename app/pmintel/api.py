@@ -408,6 +408,36 @@ def size_calc(price: float, stop: float | None = None):
     return plans.size(s, price, stop)
 
 
+@app.get("/api/portfolio")
+def virtual_portfolio(scope: str = "all"):
+    """Paper account replayed from signals sealed before entry, under the owner's budget and risk profile."""
+    from . import lab_paper as LP, plans, portfolio as PF
+    from .cryptolab import CRYPTO
+    from .stocklab import STOCKS
+    if scope not in ("all", "proven"):
+        raise HTTPException(400, "scope must be all or proven")
+    cols = ["id", "strategy", "symbol", "signal_day", "recorded_at", "sha256", "lab_verdict", "hold", "cost_rt", "status",
+            "entry_day", "entry_price", "exit_day", "ret", "spy_ret", "excess", "last_price", "last_day"]
+    rows = q(f"SELECT {', '.join(cols)} FROM lab_signals ORDER BY id") if _has_table("lab_signals") else []
+    for r in rows:
+        m = CRYPTO if r["strategy"].startswith("crypto:") else STOCKS
+        r["sealed_ok"] = r["recorded_at"] < LP.deadline(str(r["signal_day"]), m)
+    entries = performance()["entries"]
+    ok = {e["id"].split(":", 1)[1] for e in entries if e["id"].startswith("lab:") and e["status"] == "candidate"}
+    ok |= {e["id"].split(":", 1)[1] for e in entries if e["id"].startswith("fwd:") and e["status"] == "confirmed"}
+    labs = {"": (lab_latest() or {}).get("result") or {}, "crypto:": (lab_latest("crypto") or {}).get("result") or {}}
+    labels = {pre + k: v.get("label", k) for pre, rep in labs.items() for k, v in (rep.get("strategies") or {}).items()}
+    with db.connect() as c:
+        s = plans.get_settings(c)
+    L = plans.limits(s)
+    res = PF.replay(rows, L["budget"], L["max_position_usd"], L["max_open"],
+                    allowed=(lambda k: k in ok) if scope == "proven" else None)
+    for p in res["positions"]:
+        p["label"] = labels.get(p["strategy"], p["strategy"])
+    return {**res, "history": PF.history(rows, res["decisions"], labels)[:300], "limits": L, "scope": scope,
+            "decisions": None, "proven_strategies": sorted(ok)}
+
+
 def _opps():
     from . import plans
     perf = performance()
