@@ -302,3 +302,15 @@ CREATE TABLE IF NOT EXISTS follows (
     last_error  text
 );
 CREATE UNIQUE INDEX IF NOT EXISTS follows_ref_uq ON follows (kind, ref) WHERE active;
+
+-- latest observed price of a tracked lab signal, refreshed by lab_paper each run (for the opportunity table)
+ALTER TABLE lab_signals ADD COLUMN IF NOT EXISTS last_price double precision;
+ALTER TABLE lab_signals ADD COLUMN IF NOT EXISTS last_day date;
+ALTER TABLE lab_signals ADD COLUMN IF NOT EXISTS atr_pct double precision;
+
+-- the owner's budget and risk settings (pmintel/plans.py)
+CREATE TABLE IF NOT EXISTS owner_settings (
+    key        text PRIMARY KEY,
+    value      jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);

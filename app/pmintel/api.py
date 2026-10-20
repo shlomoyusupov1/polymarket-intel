@@ -372,6 +372,86 @@ def follows_remove(fid: int):
     return {"ok": True}
 
 
+class SettingsIn(BaseModel):
+    budget: float | None = None
+    profile: str | None = None
+    fee_min: float | None = None
+    fee_pct: float | None = None
+    fractional: bool | None = None
+
+
+@app.get("/api/settings")
+def settings_get():
+    from . import plans
+    with db.connect() as c:
+        s = plans.get_settings(c)
+    return {"settings": s, "limits": plans.limits(s), "profiles": plans.PROFILES}
+
+
+@app.put("/api/settings")
+def settings_put(body: SettingsIn):
+    from . import plans
+    try:
+        with db.connect() as c:
+            s = plans.save_settings(c, {k: v for k, v in body.model_dump().items() if k in body.model_fields_set})
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    return {"settings": s, "limits": plans.limits(s), "profiles": plans.PROFILES}
+
+
+@app.get("/api/size")
+def size_calc(price: float, stop: float | None = None):
+    """The owner's own entry/stop -> position size, fees and planned loss under the saved risk settings."""
+    from . import plans
+    with db.connect() as c:
+        s = plans.get_settings(c)
+    return plans.size(s, price, stop)
+
+
+def _opps():
+    from . import plans
+    perf = performance()
+    labs = {"stocks": (lab_latest() or {}).get("result"), "crypto": (lab_latest("crypto") or {}).get("result")}
+    with db.connect() as c:
+        return plans.opportunities(c, perf["entries"], labs)
+
+
+@app.get("/api/opportunities")
+def opportunities_list():
+    """Everything worth a look across stocks, crypto and Polymarket, with its research state. No invented numbers."""
+    return {"rows": _opps(), "generated_at": datetime.now(timezone.utc)}
+
+
+@app.get("/api/plan/{kind}/{rid}")
+def trade_plan(kind: str, rid: int):
+    from . import follows as F, plans
+    from .orderbook import summarize as book_summary
+    row = next((r for r in _opps() if r["kind"] == kind and r["id"] == rid), None)
+    if row is None:
+        raise HTTPException(404, "ההזדמנות הזו כבר לא פתוחה")
+    extra = {}
+    if kind == "follow" and row["domain"] == "polymarket":
+        try:
+            snap = F.snapshot("polymarket", row["symbol"])
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(502, "לא הצלחתי לקרוא את השוק מ-Polymarket כרגע.") from e
+        outs = []
+        for it in snap["items"][:6]:
+            asks = None
+            if it.get("token"):
+                try:
+                    b = book_summary(cached(("book", it["token"]), 30, lambda t=it["token"]: clob().book(t)))
+                    asks = (b or {}).get("levels", {}).get("asks")
+                except Exception:  # noqa: BLE001 - fall back to the display price, and say so
+                    asks = None
+            outs.append({"name": it["name"], "price": it["price"], "asks": asks})
+        extra = {"outcomes": outs, "end": snap.get("end"), "rules": snap.get("rules"),
+                 "resolution_source": snap.get("resolution_source"), "category": snap.get("category")}
+    with db.connect() as c:
+        s = plans.get_settings(c)
+    return plans.plan(row, s, extra)
+
+
 def _market(name: str):
     from . import cryptolab, stocklab
     if name not in ("stocks", "crypto"):

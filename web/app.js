@@ -105,13 +105,18 @@ function starBtn(id) {
 const ROUTES = [
   { id: "home", path: "#/", label: "היום", short: "היום", icon: "home", primary: true, bottom: true,
     lead: "תשובה אחת: יש היום משהו שהנתונים תומכים בו? ולמה." },
+  { id: "opps", path: "#/opps", label: "הזדמנויות", short: "הזדמנויות", icon: "list", primary: true, bottom: true,
+    lead: "כל מה שהמערכת מצאה לבדוק — מניות, קריפטו ו-Polymarket — עם מצב המחקר של כל אחד. מספר שלא מבוסס על ראיות לא מוצג." },
+  { id: "settings", path: "#/settings", label: "התקציב שלי", short: "תקציב", icon: "wallet",
+    lead: "כמה כסף יש לך לניסוי, כמה מוכן להפסיד בעסקה, ומה העמלה של הברוקר. כל החישובים במערכת יוצאים מכאן." },
+  { id: "plan", path: "#/plan", label: "כרטיס עסקה", lead: "" },
   { id: "follow", path: "#/follow", label: "המעקב שלי", short: "מעקב", icon: "star", primary: true, bottom: true,
     lead: "הדבק קישור מ-Polymarket או כתוב סימול של מניה או מטבע. תקבל הודעה בטלגרם כשהמחיר זז." },
   { id: "stocks", path: "#/stocks", label: "מניות", short: "מניות", icon: "lab",
     lead: "מה קורה בשוק עכשיו, ואיזה תחומים עולים או יורדים. זה מידע, לא המלצה." },
   { id: "evidence", path: "#/evidence", label: "המניות שלי", section: "stocks",
     lead: "כל מה שידוע על המניות שאתה עוקב אחריהן: דיווחים רשמיים, טיפים, מחיר לפני ואחרי, ומה עוד לא ידוע." },
-  { id: "check", path: "#/check", label: "בדיקת מניה", short: "בדיקה", icon: "search", primary: true, bottom: true,
+  { id: "check", path: "#/check", label: "בדיקת מניה", short: "בדיקה", icon: "search",
     lead: "קיבלת טיפ? הכנס סימול ותראה אם יש סימנים לניפוח מחיר לפני שאתה קונה." },
   { id: "lab", path: "#/lab", label: "מעבדה", section: "stocks",
     lead: "כאן בודקים אם שיטות מסחר מוכרות היו מרוויחות ב-10 השנים האחרונות. שיטה שלא הוכחה — לא משתמשים בה." },
@@ -148,7 +153,9 @@ function route() {
   let id = "home", arg = null;
   const m = hash.match(/^#\/m\/(.+)$/);
   const mc = hash.match(/^#\/check\/(.+)$/);
-  if (m) { id = "detail"; arg = decodeURIComponent(m[1]); }
+  const mp = hash.match(/^#\/plan\/(\w+)\/(\d+)$/);
+  if (mp) { id = "plan"; arg = [mp[1], mp[2]]; }
+  else if (m) { id = "detail"; arg = decodeURIComponent(m[1]); }
   else if (mc) { id = "check"; arg = decodeURIComponent(mc[1]); }
   else { const r = ROUTES.find((x) => x.path === hash); if (r) id = r.id; }
   current = id;
@@ -162,7 +169,7 @@ function route() {
   const view = $("#view");
   const body = h("div", null, skel(5));
   const parts = [];
-  if (id !== "detail" && id !== "home" && r) parts.push(h("header", { class: "page-head" }, h("h1", null, r.id === "pm" ? "Polymarket — מה זה ואיך זה עובד" : r.label), r.lead ? h("p", null, r.lead) : null));
+  if (id !== "detail" && id !== "home" && id !== "plan" && r) parts.push(h("header", { class: "page-head" }, h("h1", null, r.id === "pm" ? "Polymarket — מה זה ואיך זה עובד" : r.label), r.lead ? h("p", null, r.lead) : null));
   if (inPm) parts.push(h("nav", { class: "subtabs", "aria-label": "Polymarket" },
     PM_TABS.map((t) => { const x = ROUTES.find((y) => y.id === t); return h("a", { href: x.path, "aria-current": (t === id || (id === "detail" && t === "markets")) ? "page" : null }, t === "pm" ? "מה זה" : x.label); })));
   if (inStocks) parts.push(h("nav", { class: "subtabs", "aria-label": "מניות" },
@@ -801,6 +808,136 @@ PAGES.etf = async (view) => {
         h("li", null, "חלקי מניות (0.001) — כך שגם QQQ יקרה אפשרית. עצירת כניסות בירידה של 8% מהשיא.")))));
 };
 
+// ---- הזדמנויות (Opportunity Center) ----
+const DOMAIN = { stocks: "מניות", crypto: "קריפטו", polymarket: "Polymarket" };
+const ACT_CLS = { "מועמדת לפי אסטרטגיה": "ok", "לבדיקה": "info", "במעקב": "", "להמתין": "wait" };
+const usd2 = (v) => v == null ? "—" : "$" + Number(v).toLocaleString("en", { maximumFractionDigits: v < 10 ? 2 : 2, minimumFractionDigits: 2 });
+const when = (v) => { if (!v) return "—"; const d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString("he-IL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); };
+function budgetBar(st) {
+  if (!st) return null; const L = st.limits;
+  return h("div", { class: "budget-bar" },
+    h("span", null, "תקציב ", h("strong", null, ltr("$" + L.budget.toLocaleString())), ` · פרופיל ${L.profile_label} · עד `, ltr(usd2(L.max_position_usd)), " לעסקה · עד ",
+      ltr(usd2(L.risk_usd)), " הפסד מתוכנן לעסקה"),
+    h("a", { href: "#/settings" }, "שנה"));
+}
+const oppPrice = (r) => r.price == null ? "—" : r.price_unit === "prob" ? `${r.top_name ? r.top_name + ": " : ""}${Math.round(r.price * 100)}%` : usd2(r.price);
+PAGES.opps = async (view) => {
+  const [d, st] = await Promise.all([api("/api/opportunities"), api("/api/settings").catch(() => null)]);
+  if (current !== "opps") return;
+  const L = st ? st.limits : null;
+  const F = { domain: "all", action: "all", risk: "all", sort: "action" };
+  const list = h("div", { class: "opps" });
+  const perTrade = (r) => !L ? "—" : r.domain === "polymarket" ? usd2(L.risk_usd) : usd2(L.max_position_usd);
+  const cell = (k, v, cls) => h("div", { class: "c " + (cls || "") }, h("div", { class: "k" }, k), h("div", { class: "v" }, v));
+  const draw = () => {
+    let rows = d.rows.filter((r) => (F.domain === "all" || r.domain === F.domain) && (F.action === "all" || r.action === F.action)
+      && (F.risk === "all" || r.risk === F.risk));
+    if (F.sort === "updated") rows = [...rows].sort((a, b) => new Date(b.updated) - new Date(a.updated));
+    if (F.sort === "risk") { const R = { "נמוך": 0, "בינוני": 1, "גבוה": 2 }; rows = [...rows].sort((a, b) => (R[a.risk] ?? 3) - (R[b.risk] ?? 3)); }
+    list.replaceChildren(...(rows.length ? rows.map((r) => h("a", { class: "card opp", href: `#/plan/${r.kind}/${r.id}` },
+      h("div", { class: "row-between" }, h("div", null, h("strong", { class: "asset", dir: "auto" }, r.asset), " ", h("span", { class: "badge" }, DOMAIN[r.domain])),
+        h("span", { class: "badge " + (ACT_CLS[r.action] || "") }, r.action)),
+      h("div", { class: "faint", dir: "auto" }, r.strategy, r.warning ? " · אזהרה" : ""),
+      h("div", { class: "grid" },
+        cell("מחיר אחרון", h("span", null, ltr(oppPrice(r)), h("div", { class: "faint" }, when(r.price_at)))),
+        cell("כניסה", r.entry),
+        cell("סכום לעסקה", perTrade(r)),
+        cell("יעד", r.target == null ? "טרם נקבע" : usd2(r.target), r.target == null ? "muted" : ""),
+        cell("יציאה בהפסד", r.stop == null ? "טרם נקבע" : usd2(r.stop), r.stop == null ? "muted" : ""),
+        cell("יחס סיכוי-סיכון", "אין חישוב אמין", "muted"),
+        cell("אופק זמן", r.horizon),
+        cell("מצב מחקר", stateBadge(r.research)),
+        cell("סיכון (תנודה)", r.risk || "—")),
+      h("div", { class: "more-link" }, "לכרטיס העסקה המלא"))) : [empty("אין כאן כלום לפי הסינון הזה.")]));
+  };
+  const chips = (key, opts) => h("div", { class: "seg", role: "group" }, opts.map(([v, l]) => h("button", { type: "button", "aria-pressed": String(F[key] === v),
+    onclick: (e) => { F[key] = v; e.currentTarget.parentNode.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b === e.currentTarget))); draw(); } }, l)));
+  const sel = (key, opts, label) => h("select", { "aria-label": label, onchange: (e) => { F[key] = e.target.value; draw(); } }, opts.map(([v, l]) => h("option", { value: v }, l)));
+  const proven = d.rows.filter((r) => r.action === "מועמדת לפי אסטרטגיה").length;
+  draw();
+  view.replaceChildren(h("div", { class: "stack" },
+    h("section", { class: "verdict" + (proven ? " go" : "") }, h("h2", null, proven ? `${proven} מבוססות על שיטה שהוכחה.` : "אין כאן שום דבר שהוכח."),
+      h("p", null, `${d.rows.length} דברים שהמערכת עוקבת אחריהם. ${proven ? "" : "כולם במצב בדיקה או המתנה — לכן אין מחיר כניסה, יעד או עצירה מומלצים."}`)),
+    budgetBar(st),
+    h("div", { class: "toolbar" }, chips("domain", [["all", "הכל"], ["stocks", "מניות"], ["crypto", "קריפטו"], ["polymarket", "Polymarket"]]),
+      sel("action", [["all", "כל הפעולות"], ["מועמדת לפי אסטרטגיה", "מועמדת לפי אסטרטגיה"], ["לבדיקה", "לבדיקה"], ["במעקב", "במעקב"], ["להמתין", "להמתין"]], "פעולה"),
+      sel("risk", [["all", "כל רמות הסיכון"], ["נמוך", "סיכון נמוך"], ["בינוני", "סיכון בינוני"], ["גבוה", "סיכון גבוה"]], "סיכון"),
+      sel("sort", [["action", "מיון: הכי רלוונטי"], ["updated", "מיון: עדכון אחרון"], ["risk", "מיון: סיכון נמוך קודם"]], "מיון")),
+    list,
+    h("p", { class: "faint" }, "\"טרם נקבע\" אומר שאין שיטה מאומתת שמגדירה את המספר הזה. המערכת לא ממציאה מחיר כניסה, יעד או עצירה.")));
+};
+
+PAGES.plan = async (view, arg) => {
+  const [kind, id] = arg || [];
+  const p = await api(`/api/plan/${kind}/${id}`);
+  if (current !== "plan") return;
+  const r = p.row;
+  const parts = [h("header", { class: "page-head" }, h("h1", { dir: "auto" }, r.asset),
+      h("p", null, h("span", { class: "badge" }, DOMAIN[r.domain]), " ", h("span", { class: "badge " + (ACT_CLS[r.action] || "") }, r.action), " ", stateBadge(r.research))),
+    budgetBar({ limits: p.limits })];
+  p.sections.forEach((x) => parts.push(card(x.title, null, h("ul", { class: "clean plain" }, x.lines.map((l) => h("li", { dir: "auto" }, l))))));
+  if (p.polymarket) {
+    const pm = p.polymarket;
+    parts.splice(3, 0, card("החשבון הפשוט", `לכל אחת מהתשובות: שמים ${usd2(pm.stake)} על "כן"`,
+      h("div", { class: "scroll-x" }, h("table", { class: "t" },
+        h("thead", null, h("tr", null, ["תשובה", "מחיר", "מקבלים אם כן", "רווח אם כן", "הפסד אם לא", "מקור המחיר"].map((x) => h("th", null, x)))),
+        h("tbody", null, pm.outcomes.map((o) => h("tr", null, h("td", { dir: "auto" }, o.name),
+          h("td", null, o.ok ? ltr((o.price * 100).toFixed(1) + "¢") : "—"),
+          h("td", null, o.ok ? ltr(usd2(o.payout_if_yes)) : "—"), h("td", null, o.ok ? h("span", { class: "up" }, ltr(usd2(o.profit_if_yes))) : "—"),
+          h("td", null, o.ok ? h("span", { class: "down" }, ltr(usd2(o.loss_if_no))) : "—"),
+          h("td", { class: "faint" }, !o.ok ? "אין מחיר" : o.executable ? "ספר פקודות עכשיו" : "מחיר תצוגה")))))),
+      pm.rules ? h("details", { class: "more" }, h("summary", null, "כללי ההכרעה (מ-Polymarket)"), h("p", { dir: "auto", class: "rules" }, pm.rules),
+        pm.resolution_source ? h("p", { class: "faint", dir: "auto" }, "מקור ההכרעה: ", pm.resolution_source) : null) : null));
+  }
+  if (p.sizing && r.price) {
+    const entry = h("input", { type: "number", step: "any", value: r.price, "aria-label": "מחיר כניסה" });
+    const stop = h("input", { type: "number", step: "any", placeholder: "למשל " + (r.price * 0.95).toFixed(2), "aria-label": "מחיר עצירה" });
+    const outBox = h("ul", { class: "clean plain" });
+    const calc = async (ev) => { ev.preventDefault();
+      const q = new URLSearchParams({ price: entry.value }); if (stop.value) q.set("stop", stop.value);
+      try { const z = await api("/api/size?" + q); outBox.replaceChildren(...z.notes.map((n) => h("li", null, n)),
+        z.units != null ? h("li", null, h("strong", null, `יחידות: ${Number(z.units).toLocaleString("en", { maximumFractionDigits: 4 })} · נשאר בצד: ${usd2(z.cash_left)}`)) : null); }
+      catch (e) { outBox.replaceChildren(h("li", { class: "down" }, e.message)); } };
+    parts.push(card("מחשבון: אם הייתי קובע עצירה משלי", "השיטה עצמה לא מגדירה עצירה. כאן אפשר לבדוק כמה יחידות מתאימות לתקציב שלך עם עצירה שאתה בוחר.",
+      h("form", { class: "calc", onsubmit: calc }, h("label", null, "מחיר כניסה ($)", entry), h("label", null, "מחיר עצירה ($)", stop),
+        h("button", { class: "btn primary", type: "submit" }, "חשב")), outBox));
+  }
+  parts.push(h("p", { class: "faint" }, "מחקר וסימולציה בלבד. אין כאן ייעוץ השקעות ואין ביצוע עסקאות."));
+  view.replaceChildren(h("div", { class: "stack" }, ...parts.filter(Boolean)));
+};
+
+PAGES.settings = async (view) => {
+  const st = await api("/api/settings");
+  if (current !== "settings") return;
+  const S = st.settings, P = st.profiles;
+  const budget = h("input", { type: "number", min: 1, step: "any", value: S.budget, "aria-label": "תקציב בדולרים" });
+  const feeMin = h("input", { type: "number", min: 0, step: "any", value: S.fee_min ?? "", placeholder: "לא ידוע", "aria-label": "עמלת מינימום לפקודה" });
+  const feePct = h("input", { type: "number", min: 0, step: "any", value: S.fee_pct || 0, "aria-label": "עמלה באחוזים" });
+  const frac = h("input", { type: "checkbox", checked: S.fractional });
+  let prof = S.profile;
+  const profBox = h("div", { class: "profiles" });
+  const drawProf = () => { const b = Number(budget.value) || S.budget;
+    profBox.replaceChildren(...Object.entries(P).map(([k, x]) => h("label", { class: "prof" + (k === prof ? " on" : "") },
+      h("input", { type: "radio", name: "prof", checked: k === prof, onchange: () => { prof = k; drawProf(); } }),
+      h("div", null, h("strong", null, x.label),
+        h("div", null, `מפסיד לכל היותר ${(x.risk_pct * 100).toFixed(1)}% מהתקציב בעסקה (${usd2(b * x.risk_pct)}).`),
+        h("div", null, `עד ${Math.round(x.max_position_pct * 100)}% מהתקציב בעסקה אחת (${usd2(b * x.max_position_pct)}). עד ${x.max_open} עסקאות פתוחות.`))))); };
+  budget.addEventListener("input", drawProf);
+  drawProf();
+  const msg = h("p", { class: "form-msg", role: "status" });
+  const save = async (ev) => { ev.preventDefault();
+    try { await apiSend("PUT", "/api/settings", { budget: Number(budget.value), profile: prof, fee_min: feeMin.value === "" ? null : Number(feeMin.value),
+      fee_pct: Number(feePct.value || 0), fractional: frac.checked }); msg.className = "form-msg"; msg.textContent = "נשמר. כל החישובים במערכת מתעדכנים לפי זה."; }
+    catch (e) { msg.className = "form-msg err"; msg.textContent = e.message; } };
+  view.replaceChildren(h("form", { class: "stack settings", onsubmit: save },
+    card("כמה כסף יש לניסוי", "רק כסף שאתה מוכן להפסיד. זה משמש לחישוב בלבד — שום דבר לא נקנה.", h("label", null, "תקציב ($)", budget)),
+    card("כמה סיכון", "הפסד מתוכנן = כמה תפסיד אם תצא בעצירה שקבעת. בהימור כן/לא זה כל הסכום.", profBox),
+    card("עמלת הברוקר", "בחשבון קטן העמלה קובעת אם עסקה בכלל משתלמת. את הנתון תמצא בתעריפון של הברוקר (למשל ONE ZERO).",
+      h("label", null, "עמלת מינימום לפקודה ($)", feeMin), h("label", null, "או עמלה באחוזים מהסכום (%)", feePct),
+      h("label", { class: "check" }, frac, "הברוקר מאפשר לקנות שברי מניות")),
+    h("button", { class: "btn primary", type: "submit" }, "שמור"), msg));
+};
+
 // ---- המעקב שלי (Follow) ----
 async function apiSend(method, path, body) {
   const r = await fetch(path, { method, headers: { "Content-Type": "application/json", Accept: "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -967,7 +1104,7 @@ PAGES.home = async (view) => {
   const sysBox = h("div", null, sysLine(ag));
   view.replaceChildren(h("div", { class: "stack" },
     h("section", { class: "verdict " + VERDICT[0] }, h("div", { class: "when" }, today), h("h2", null, VERDICT[1]), h("p", null, VERDICT[2]),
-      h("p", null, h("a", { href: "#/performance" }, "מה נבדק ומה יצא"))),
+      h("p", null, h("a", { href: "#/opps" }, "מה המערכת מצאה לבדוק"), " · ", h("a", { href: "#/performance" }, "מה נבדק ומה יצא"))),
     card("המעקב שלך", "הדבק קישור או כתוב סימול. תקבל הודעה בטלגרם כשהמחיר זז.", followBox(loadFl), flBox,
       h("a", { href: "#/follow" }, "לכל המעקב")),
     card("המערכת", null, sysBox),
@@ -1261,7 +1398,7 @@ PAGES.alerts = (view) => view.replaceChildren(card("התראות", "עוד לא 
   h("p", { class: "sub" }, "מתוכנן: תזוזה חריגה בשוק ממעקב, הזדמנות מבנית בת-ביצוע, ותקלה בסריקה. ערוץ: טלגרם."),
   h("p", { class: "faint" }, "אין התראות מזויפות — המסך הזה יתמלא רק כשיהיה מנגנון אמיתי מאחוריו.")));
 PAGES.more = (view) => {
-  const G = [["מניות", ["stocks", "lab", "tips", "evidence", "etf"]], ["קריפטו", ["crypto"]],
+  const G = [["שלי", ["settings", "check"]], ["מניות", ["stocks", "lab", "tips", "evidence", "etf"]], ["קריפטו", ["crypto"]],
     ["Polymarket", ["pm", "markets", "research"]], ["המערכת", ["agents", "system"]]];
   view.replaceChildren(h("div", { class: "stack" }, G.map(([t, ids]) => h("section", null, h("h2", { class: "section-title" }, t),
     h("div", { class: "stack" }, ids.map((id) => { const r = ROUTES.find((x) => x.id === id);

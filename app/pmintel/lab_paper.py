@@ -117,6 +117,11 @@ def settle(conn, feats: dict, spy: list[dict], m: L.Market = L.STOCKS) -> int:
             i = f["day"].index(sday)
         except ValueError:
             continue
+        # latest observed price and typical daily range (14-day average high-low / close), for the plan card
+        k = len(f["c"]) - 1
+        rng = [(f["h"][j] - f["l"][j]) / f["c"][j] for j in range(max(0, k - 13), k + 1) if f["c"][j]]
+        conn.execute("UPDATE lab_signals SET last_price = %s, last_day = %s, atr_pct = %s WHERE id = %s",
+                     (f["c"][k], f["day"][k], sum(rng) / len(rng) if rng else None, rid))
         e, x = i + 1 + m.lag, i + hold + m.lag
         if e >= len(f["day"]):
             continue

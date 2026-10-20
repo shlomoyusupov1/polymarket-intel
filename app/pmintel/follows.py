@@ -70,6 +70,15 @@ def _yes_price(m: dict) -> float | None:
         return None
 
 
+def _yes_token(m: dict) -> str | None:
+    import json
+    outs, toks = m.get("outcomes"), m.get("clobTokenIds")
+    outs = json.loads(outs) if isinstance(outs, str) else (outs or [])
+    toks = json.loads(toks) if isinstance(toks, str) else (toks or [])
+    i = next((k for k, o in enumerate(outs) if str(o).lower() == "yes"), 0)
+    return str(toks[i]) if i < len(toks) else None
+
+
 def snapshot(kind: str, ref: str, gamma=_gamma, stock_fetch=None) -> dict:
     """{'label', 'url', 'items': [{'key', 'name', 'price'}]} — current prices only."""
     if kind == "polymarket":
@@ -84,12 +93,17 @@ def snapshot(kind: str, ref: str, gamma=_gamma, stock_fetch=None) -> dict:
         ms = [m for m in ev.get("markets") or [] if not m.get("closed")]
         if mk_slug:
             ms = [m for m in ms if m.get("slug") == mk_slug] or ms
-        items = [{"key": str(m["id"]), "name": m.get("groupItemTitle") or m.get("question") or "", "price": _yes_price(m)}
-                 for m in ms]
+        items = [{"key": str(m["id"]), "name": m.get("groupItemTitle") or m.get("question") or "", "price": _yes_price(m),
+                  "token": _yes_token(m), "question": m.get("question")} for m in ms]
         items = sorted([x for x in items if x["price"] is not None], key=lambda x: -x["price"])[:12]
         if not items:
             raise FollowError("לשוק הזה אין כרגע מחירים פתוחים (אולי הוא כבר נסגר).")
-        return {"label": ev.get("title") or ev_slug, "url": f"https://polymarket.com/event/{ev_slug}", "items": items}
+        cat = ev.get("category") or next((t.get("label") for t in ev.get("tags") or [] if isinstance(t, dict)), None)
+        return {"label": ev.get("title") or ev_slug, "url": f"https://polymarket.com/event/{ev_slug}", "items": items,
+                "end": ev.get("endDate") or (ms[0].get("endDate") if ms else None),
+                "rules": ev.get("description") or (ms[0].get("description") if ms else None),
+                "resolution_source": ev.get("resolutionSource") or (ms[0].get("resolutionSource") if ms else None),
+                "category": cat}
     if stock_fetch is None:
         from .stockcheck import fetch as stock_fetch
     try:
