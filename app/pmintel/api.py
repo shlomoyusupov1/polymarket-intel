@@ -464,22 +464,31 @@ def virtual_portfolio(scope: str = "all"):
         r["price_live"] = bool(lp and lp[1])
         if lp and lp[1]:
             r["last_price"], r["last_day"] = lp[0]["price"], lp[0]["src_ts"]
-    entries = performance()["entries"]
-    ok = {e["id"].split(":", 1)[1] for e in entries if e["id"].startswith("lab:") and e["status"] == "candidate"}
-    ok |= {e["id"].split(":", 1)[1] for e in entries if e["id"].startswith("fwd:") and e["status"] == "confirmed"}
+    # Do not reclassify an old signal based on a research verdict achieved AFTER
+    # its entry. A sealed, contemporaneous forward-confirmed tag is required.
+    # Until the producer stores that tag, 'proven' correctly remains empty.
     labs = {"": (lab_latest() or {}).get("result") or {}, "crypto:": (lab_latest("crypto") or {}).get("result") or {}}
     labels = {pre + k: v.get("label", k) for pre, rep in labs.items() for k, v in (rep.get("strategies") or {}).items()}
     with db.connect() as c:
         s = plans.get_settings(c)
     L = plans.limits(s)
-    res = PF.replay(rows, L["budget"], L["max_position_usd"], L["max_open"],
-                    allowed=(lambda k: k in ok) if scope == "proven" else None)
+    # No actual stop exists for these paper lab trades. Cap stake at a total-loss
+    # risk budget, rather than pretending an estimated typical loss is a stop.
+    cap = min(L["max_position_usd"], L["risk_usd"])
+    res = PF.replay(rows, L["budget"], cap, L["max_open"],
+                    eligible_at_signal=(lambda r: r.get("lab_verdict") == "forward_confirmed")
+                    if scope == "proven" else None)
     by_id = {r["id"]: r for r in rows}
     for p in res["positions"]:
         p["label"] = labels.get(p["strategy"], p["strategy"])
         p["price_live"] = by_id.get(p["id"], {}).get("price_live", False)
-    return {**res, "history": PF.history(rows, res["decisions"], labels)[:300], "limits": L, "scope": scope,
-            "decisions": None, "proven_strategies": sorted(ok)}
+    proven = sorted({r["strategy"] for r in rows
+                     if r.get("lab_verdict") == "forward_confirmed" and r.get("sealed_ok")})
+    return {**res, "history": PF.history(rows, res["decisions"], labels)[:300],
+            "limits": L, "scope": scope, "position_cap_usd": cap,
+            "simulation_note": "סימולציית מה-היה-קורה לפי ההגדרות הנוכחיות — לא יומן החלטות נעול בזמן אמת.",
+            "risk_note": "אין עצירה מוגדרת בשיטות המעבדה. הפוזיציה מוגבלת לתקציב הפסד מלא.",
+            "decisions": None, "proven_strategies": proven}
 
 
 def _opps():
