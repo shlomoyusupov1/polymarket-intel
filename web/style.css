@@ -49,7 +49,7 @@ a:hover { text-decoration: underline; }
   .top-nav a:hover { background: var(--sunk); color: var(--ink); }
   .top-nav a[aria-current="page"] { background: var(--ink); color: var(--paper); }
 }
-.bottom-nav { position: fixed; inset-inline: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(5, 1fr);
+.bottom-nav { position: fixed; inset-inline: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(6, 1fr);
   background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
 .bottom-nav a { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px 7px; min-height: 58px;
   color: var(--faint); font-size: 12px; font-weight: 500; text-decoration: none; }
@@ -288,3 +288,50 @@ details.more > summary { cursor: pointer; color: var(--accent); font-weight: 500
 .card.step > div { min-width: 0; }
 .card.step .quick { flex-wrap: wrap; }
 .card.step .quick input { min-width: 0; flex: 1 1 140px; }
+
+/* ---- home: plain answers ---- */
+.verdict.wait h2 { color: var(--warn); }
+.ladder { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 10px; }
+.ladder li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 12px; color: var(--muted); }
+.ladder li .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+  background: var(--sunk); color: var(--muted); }
+.ladder li strong { color: var(--text); }
+.ladder li.done .n { background: var(--up-bg); color: var(--up); }
+.ladder li.now { border-color: var(--accent); background: var(--info-bg); }
+.ladder li.now .n { background: var(--accent); color: var(--accent-ink); }
+.ladder .here { margin-inline-start: 8px; font-size: 12px; font-weight: 600; color: var(--accent); }
+.thoughts { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 12px; }
+.thoughts li { display: grid; grid-template-columns: 9em 1fr; gap: 12px; align-items: baseline; line-height: 1.55; }
+.thoughts li strong { white-space: nowrap; }
+.thoughts .dot { margin-inline-end: 6px; transform: translateY(-1px); }
+@media (max-width: 520px) { .thoughts li { grid-template-columns: 1fr; gap: 2px; } }
+.picks { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.picks li { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.picks li:last-child { border-bottom: 0; }
+.picks .sym { font-weight: 700; font-size: 17px; color: var(--ink); text-decoration: none; }
+.agents-mini { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 0; }
+.agents-mini li { display: grid; grid-template-columns: 10px 104px 1fr auto; gap: 10px; align-items: baseline; padding: 9px 0;
+  border-bottom: 1px solid var(--line); min-width: 0; }
+.agents-mini li:last-child { border-bottom: 0; }
+.agents-mini .who { font-weight: 600; color: var(--ink); text-decoration: none; }
+.agents-mini .what { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.agents-mini .when { color: var(--faint); font-size: 13px; white-space: nowrap; }
+.agents-mini li.working .what { color: var(--accent); }
+.agents-mini li.error .what { color: var(--down); }
+.dot.info { background: var(--accent); animation: pulse-dot 1.6s ease-in-out infinite; }
+@keyframes pulse-dot { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .dot.info { animation: none; } }
+@media (max-width: 520px) { .agents-mini li { grid-template-columns: 10px 1fr auto; row-gap: 2px; } .agents-mini .when { grid-row: 1; grid-column: 3; } .agents-mini .what { grid-column: 2 / -1; font-size: 14px; } }
+.mini-title { margin: 14px 0 6px; font-size: 14px; color: var(--muted); font-weight: 600; }
+.feed-mini { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px; color: var(--text); }
+.feed-mini .t { color: var(--faint); margin-inline-end: 4px; }
+/* ---- comparison screen ---- */
+.badge.info { background: var(--info-bg); color: var(--accent); }
+.entry .why { margin: 8px 0 10px; }
+.entry .missing { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--sunk); font-size: 14px; }
+.entry .src { margin-top: 8px; font-size: 12px; }
+.engine .ctx { color: var(--muted); margin: -4px 0 12px; font-size: 14px; }
+.legend li { margin: 6px 0; }
+.picks .why { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.agents-sum { margin: 0 0 8px; font-size: 14px; color: var(--muted); }

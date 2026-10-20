@@ -18,7 +18,8 @@ AGENTS = [
     ("judge", "השופט", "מודד כל מקור מול SPY אחרי עלויות", (), None),
     ("trader", "הסוחר", "סוחר בכסף מדומה בקרנות סל לפי כללים קבועים", ("etf_paper",), timedelta(days=4)),
     ("researcher", "החוקר", "בודק אם מחירי Polymarket ניבאו נכון", ("research", "backfill"), None),
-    ("lab", "המעבדה", "בודקת אסטרטגיות על 10 שנים ועוקבת אחריהן קדימה", ("stocklab", "lab_paper"), None),
+    ("lab", "המעבדה", "בודקת אסטרטגיות מניות על 10 שנים ועוקבת אחריהן קדימה", ("stocklab", "lab_paper"), None),
+    ("crypto", "חוקר הקריפטו", "אותן בדיקות על 20 מטבעות גדולים, מול החזקת ביטקוין", ("cryptolab", "crypto_paper"), None),
     ("keeper", "אב הבית", "מעבד, זיכרון, דיסק ומסד הנתונים", (), None),
 ]
 JOB_AGENT = {j: a[0] for a in AGENTS for j in a[3]}
@@ -99,6 +100,9 @@ def build(jobs: dict[str, dict], facts: dict, now: datetime | None = None) -> li
         elif aid == "lab":
             line = f.get("lab_line") or "עוד לא רצה"
             href = "#/lab"
+        elif aid == "crypto":
+            line = f.get("crypto_line") or "עוד לא רץ"
+            href = "#/crypto"
         elif aid == "keeper":
             if f.get("cpu_pct") is not None:
                 line = f"מעבד {f['cpu_pct']:.0f}% · דיסק {f.get('disk_pct') or 0:.0f}% · מסד {f.get('db_gb') or 0:.1f}GB"

@@ -21,3 +21,21 @@ category (crypto 7%, sports/economics/culture/weather/other 5%, politics/finance
 geopolitics 0). As a share of the stake that is rate × (1 − p): buying at 10¢ costs 3.6% in politics.
 The fee is taken in shares, so it shrinks a winner's payoff; a loser still loses exactly the stake.
 Applied to all historical markets (conservative; what the same trade costs today).
+
+## Research states (one vocabulary on every screen)
+
+| State | Meaning |
+|---|---|
+| Forward Confirmed | passed pre-registered criteria on signals sealed before the fact **and** passed the historical test. Still not a promise of real-money profit |
+| Forward Validation | being tracked forward with paper money; no conclusion yet |
+| Historical Candidate | passed out of sample on past data only — a hypothesis |
+| Not Supported / Failed | no edge after costs, or the forward gate failed |
+| Insufficient Data | too few observations for any conclusion |
+
+A historical result alone can never reach "confirmed". A Polymarket rule that is positive on mid prices
+is at most a candidate until an executable ask confirms it. Each entry lists the criteria still missing.
+
+## Production evidence
+
+    bash scripts/evidence.sh             # deployed commit vs main, containers, 72h jobs and errors, data, backups, research
+    bash scripts/evidence.sh --research  # first runs the stock lab, crypto lab and Polymarket research

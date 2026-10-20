@@ -51,3 +51,42 @@ sudo docker compose run --rm stocklab      # a few minutes; prints one line per 
 ```
 Results: page **מעבדה** (`#/lab`). The screenshots in `docs/screenshots/lab-*.png` use synthetic data with
 a planted edge — they show the layout, not a finding.
+
+## Crypto (cryptolab.py)
+
+The same strategies (except turn-of-month), the same walk-forward, baseline, Holm correction and gate,
+on 20 large coins (Yahoo `XXX-USD` daily bars), against **holding bitcoin** over the identical days.
+
+| | Stocks | Crypto |
+|---|---|---|
+| Bars | trading sessions | calendar days (UTC) |
+| Holds | 5 / 10 / 20 sessions | 7 / 14 / 30 days |
+| Entry | next open | open one full day after the signal bar (the next bar opens the instant the signal bar closes) |
+| Cost | per-stock spread estimate + 0.1% | fixed round trip, `CRYPTO_COST_RT` (default 1%) |
+| Benchmark | SPY | BTC-USD |
+
+Forward paper tracking shares `lab_signals` (strategy names prefixed `crypto:`); the `labpaper` service
+seals crypto signals after 00:15 UTC each day, before the entry bar opens. No wallet, keys or exchange
+account are involved.
+
+    sudo docker compose run --rm cryptolab
+
+## Candlestick patterns
+
+Seven classic patterns, each with a small grid fixed in advance, run in both labs (stocks and crypto)
+through the same walk-forward, baseline, Holm correction and gate:
+
+| Pattern | Context | Side |
+|---|---|---|
+| Hammer | after a down move (close < 20-day average and < 5 days ago) | buy |
+| Bullish engulfing | after a down move; variant: only above the 200-day average | buy |
+| Doji | after a down move | buy |
+| Morning star (3 bars) | after a down move | buy |
+| Three white soldiers | — | buy |
+| Shooting star | after an up move | warning |
+| Bearish engulfing | after an up move; variant: only below the 200-day average | warning |
+
+A **warning** pattern is scored as how much the asset lagged the benchmark after the signal, minus the
+same cost: what not buying (or selling what you hold) would have saved. No short sale is assumed.
+Published research (e.g. Marshall, Young & Rose 2006 on US large caps) found little value after costs;
+the lab tests that claim on our own data.

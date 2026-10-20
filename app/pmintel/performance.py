@@ -1,81 +1,131 @@
-"""One scoreboard for every strategy and source, across engines (stocks, Polymarket, tip sources).
+"""One scoreboard for every strategy and source, across engines (stocks, crypto, Polymarket, tip sources).
 
 Each entry has the same fields so the evidence can be compared without pretending a contract's
-probability and a stock's return are the same thing:
+probability, a coin's return and a stock's return are the same thing:
 
-  engine     stocks | polymarket | sources
-  kind       historical  — tested on past data, out of sample (can never prove executability)
-             forward     — signals recorded before the fact, paper money, real prices
-             measured    — someone else's calls, measured after the fact
-  n          sample size the verdict rests on
-  success    share of trades that beat the benchmark after costs (None when not defined)
-  mean_net   average result per trade after costs, in the engine's own unit (see `unit`)
-  mean_lo95  95% lower bound of mean_net (None when not computable)
-  status     passed | promising | failed | collecting  (normalised from each engine's own verdict)
-  why        one line: what decides the status
+  engine      stocks | crypto | polymarket | sources
+  kind        historical — tested on past data, out of sample (can never prove executability)
+              forward    — signals recorded before the fact, paper money, real prices
+              measured   — someone else's calls, recorded when they arrived, scored afterwards
+  n           sample size the verdict rests on;  clusters: independent groups (entry weeks / events)
+  period      first … last observation
+  success     share that beat the benchmark after costs (None when not defined)
+  mean_net    average result per trade after costs, in the engine's own unit (see `unit`)
+  mean_lo95   95% lower bound of the figure that decides the verdict (None when not computable)
+  avg_win / avg_loss, max_drawdown (definition in `dd_note`), benchmark
+  status      one of STATUSES below — the only vocabulary the site shows
+  why         what decides the status;  missing: the pre-registered criteria not yet met
+
+Statuses (strictly ordered by how much has been shown):
+  confirmed     Forward Confirmed — passed pre-registered criteria on signals recorded before the fact
+                (still not a promise of real-money profit)
+  validating    Forward Validation — being tracked forward with paper money; no conclusion yet
+  candidate     Historical Candidate — passed out-of-sample on past data only: a hypothesis
+  failed        Not Supported / Failed — no edge after costs, or the forward test failed
+  insufficient  Insufficient Data — too few observations for any conclusion
 """
 from __future__ import annotations
 
-STATUS = {
-    # stock lab / forward tracker
-    "candidate_for_paper": "passed", "confirmed": "passed", "edge_below_target": "promising",
-    "not_supported": "failed", "not_confirmed": "failed", "insufficient_data": "collecting", "collecting": "collecting",
-    # tip-source gate
-    "reliable": "passed", "promising": "promising", "not_reliable": "failed",
-    # Polymarket walk-forward
-    "supported": "passed", "oos_positive_needs_execution_check": "promising",
-}
+STATUSES = ("confirmed", "validating", "candidate", "failed", "insufficient")
+BENCH = {"stocks": "SPY", "crypto": "ביטקוין"}
+UNIT = {"stocks": "מניות", "crypto": "מטבעות"}
+LAB_GATE = "50+ עסקאות, גבול תחתון חיובי מעל קנייה אקראית, שורד תיקון Holm, 60%+ הצלחה שאינה מקרית"
 
 
 def _e(**kw) -> dict:
     base = {"engine": None, "kind": None, "id": None, "label": None, "version": None, "updated": None,
-            "data": None, "n": None, "success": None, "mean_net": None, "mean_lo95": None, "unit": None,
-            "max_drawdown": None, "benchmark": None, "verdict": None, "status": "collecting", "why": None}
+            "data": None, "period": None, "n": None, "clusters": None, "success": None, "mean_net": None,
+            "mean_lo95": None, "unit": None, "avg_win": None, "avg_loss": None, "max_drawdown": None,
+            "dd_note": None, "benchmark": None, "verdict": None, "status": "insufficient", "why": None,
+            "missing": [], "sensitivity": None, "assumed_cost": None}
     base.update(kw)
-    base["status"] = STATUS.get(base["verdict"], base["status"])
+    assert base["status"] in STATUSES, base["status"]
     return base
 
 
-def from_stocklab(report: dict | None, updated=None) -> list[dict]:
-    if not report:
-        return []
+def _period(a, b) -> str | None:
+    return f"{a} … {b}" if a and b else None
+
+
+def lab_missing(v: dict) -> list[str]:
+    """The stock/crypto lab gate, criterion by criterion (stocklab.verdict)."""
     out = []
-    for k, v in (report.get("strategies") or {}).items():
-        out.append(_e(engine="stocks", kind="historical", id=f"lab:{k}", label=v.get("label", k), version="stocklab_v1",
-                      updated=updated, data=f"Yahoo daily, {report.get('first_day')}…{report.get('last_day')}, "
-                      f"{len(report.get('universe') or [])} stocks",
-                      n=v.get("n"), success=v.get("success_rate"), mean_net=v.get("edge_vs_baseline"),
-                      mean_lo95=v.get("edge_lo95"), unit="לעסקה, מעל קנייה אקראית",
-                      benchmark="SPY + קנייה אקראית", verdict=v.get("verdict"),
-                      why=_lab_why(v)))
+    if (v.get("n") or 0) < 50:
+        out.append(f"50 עסקאות מחוץ למדגם (יש {v.get('n') or 0})")
+    if not (v.get("edge_lo95") is not None and v["edge_lo95"] > 0):
+        out.append("גבול תחתון חיובי מעל קנייה אקראית")
+    if not (v.get("p_holm") is not None and v["p_holm"] < 0.05):
+        out.append("שרידות בתיקון לבדיקת הרבה שיטות (Holm)")
+    if not ((v.get("success_rate") or 0) >= 0.60 and (v.get("success_lo95") or 0) > 0.5):
+        out.append("60%+ הצלחה שאינה מקרית")
     return out
 
 
-def _lab_why(v: dict) -> str:
+def from_stocklab(report: dict | None, updated=None, engine: str = "stocks") -> list[dict]:
+    if not report:
+        return []
+    out, b = [], BENCH[engine]
+    pre = "" if engine == "stocks" else engine + ":"
+    for k, v in (report.get("strategies") or {}).items():
+        verdict = v.get("verdict")
+        status = {"candidate_for_paper": "candidate", "insufficient_data": "insufficient"}.get(verdict, "failed")
+        out.append(_e(engine=engine, kind="historical", id=f"lab:{pre}{k}", label=v.get("label", k),
+                      version=f"{'stock' if engine == 'stocks' else engine}lab_v1", updated=updated,
+                      data=f"Yahoo daily, {len(report.get('universe') or [])} {UNIT[engine]}",
+                      period=_period(v.get("first_entry"), v.get("last_entry")),
+                      n=v.get("n"), clusters=v.get("clusters"), success=v.get("success_rate"),
+                      mean_net=v.get("edge_vs_baseline"), mean_lo95=v.get("edge_lo95"),
+                      unit="לעסקה, מעל קנייה אקראית אחרי עלות", avg_win=v.get("avg_win"), avg_loss=v.get("avg_loss"),
+                      max_drawdown=v.get("max_dd_sum"), dd_note="סכום עסקאות מצטבר, לא תיק",
+                      benchmark=f"{b} + קנייה אקראית", verdict=verdict, status=status,
+                      why=_lab_why(v, b), missing=lab_missing(v) if status != "candidate" else [],
+                      sensitivity=v.get("cost_sensitivity"), assumed_cost=report.get("assumed_cost")))
+    return out
+
+
+def _lab_why(v: dict, bench: str = "SPY") -> str:
+    side = " (נר אזהרה: נמדד אם הנכס פיגר אחרי האיתות)" if v.get("side") == -1 else ""
     if v.get("verdict") == "insufficient_data":
-        return f"רק {v.get('n') or 0} עסקאות מחוץ למדגם (צריך 50)"
+        return f"INSUFFICIENT DATA: רק {v.get('n') or 0} עסקאות מחוץ למדגם (צריך 50){side}"
     if v.get("verdict") == "candidate_for_paper":
-        return "ניצחה את SPY ואת הקנייה האקראית מחוץ למדגם, ושרדה את התיקון לריבוי בדיקות"
+        return f"עברה על העבר מול {bench} וקנייה אקראית, ושרדה את התיקון. השערה בלבד עד שתוכח קדימה{side}"
+    if v.get("verdict") == "edge_below_target":
+        return f"FAILED: יש יתרון קטן מעל אקראי, אבל פחות מ-60% הצלחה{side}"
     if (v.get("edge_lo95") or 0) > 0:
-        return "גבול תחתון חיובי, אבל " + ("מתחת ל-60% הצלחה" if v.get("verdict") == "edge_below_target"
-                                               else "לא אחרי התיקון לבדיקת כמה אסטרטגיות")
-    return "אין יתרון על קנייה אקראית אחרי עלויות"
+        return f"FAILED: גבול תחתון חיובי, אבל לא שורד את התיקון לבדיקת הרבה שיטות{side}"
+    return f"FAILED: אין יתרון על קנייה אקראית אחרי עלויות{side}"
 
 
-def from_lab_forward(summary: dict, lab_report: dict | None) -> list[dict]:
+def from_lab_forward(summary: dict, lab_report: dict | None, engine: str = "stocks") -> list[dict]:
     st = (lab_report or {}).get("strategies") or {}
-    out = []
+    out, b = [], BENCH[engine]
+    pre = "" if engine == "stocks" else engine + ":"
     for k, v in summary.items():
-        verdict = v["status"]
-        why = {"confirmed": "50+ עסקאות קדימה, 60%+ ניצחו את SPY אחרי עלות, גבול תחתון חיובי",
-               "not_confirmed": "50+ עסקאות קדימה, אבל השער לא הושג",
-               "collecting": f"{v['n']} עסקאות קדימה עד עכשיו (צריך 50)"}[verdict]
-        if verdict == "confirmed" and st.get(k, {}).get("verdict") != "candidate_for_paper":
-            verdict, why = "edge_below_target", "חיובית קדימה, אבל נכשלה בבדיקה על העבר"
-        out.append(_e(engine="stocks", kind="forward", id=f"fwd:{k}", label=st.get(k, {}).get("label", k),
-                      version="lab_paper", data="signals sealed before the next open; Yahoo daily",
-                      n=v["n"], success=v["success_rate"], mean_net=v["mean_excess"], mean_lo95=v["mean_lo95"],
-                      unit="לעסקה, מול SPY", benchmark="SPY באותם ימים", verdict=verdict, why=why))
+        hist = st.get(k, {}).get("verdict")
+        missing = []
+        if v["n"] < 50:
+            missing.append(f"50 עסקאות קדימה (יש {v['n']})")
+        if not (v["success_rate"] >= 0.60 and (v.get("success_lo95") or 0) > 0.5):
+            missing.append(f"60%+ ניצחו את {b}, שאינו מקרי")
+        if not (v.get("mean_lo95") is not None and v["mean_lo95"] > 0):
+            missing.append("גבול תחתון חיובי לממוצע")
+        if hist != "candidate_for_paper":
+            missing.append("מעבר בבדיקה על העבר")
+        if v["status"] == "confirmed" and hist == "candidate_for_paper":
+            status, why = "confirmed", f"עברה על העבר וגם קדימה: 50+ עסקאות, 60%+ ניצחו את {b} אחרי עלות. עדיין לא הבטחה לרווח"
+        elif v["status"] == "not_confirmed":
+            status, why = "failed", "FAILED: 50+ עסקאות קדימה והשער לא הושג"
+        else:
+            status = "validating"
+            why = (f"{v['n']} עסקאות קדימה עד עכשיו (צריך 50)" if v["n"] < 50
+                   else "חיובית קדימה, אבל לא עברה את הבדיקה על העבר — לא נחשבת")
+        out.append(_e(engine=engine, kind="forward", id=f"fwd:{pre}{k}", label=st.get(k, {}).get("label", k),
+                      version="lab_paper", data="איתותים נחתמים לפני הכניסה; Yahoo daily",
+                      period=_period(v.get("first_entry"), v.get("last_entry")),
+                      n=v["n"], clusters=v.get("clusters"), success=v["success_rate"], mean_net=v["mean_excess"],
+                      mean_lo95=v["mean_lo95"], unit=f"לעסקה, מול {b} אחרי עלות", avg_win=v.get("avg_win"),
+                      avg_loss=v.get("avg_loss"), benchmark=f"{b} באותם ימים", verdict=v["status"], status=status,
+                      why=why, missing=missing if status != "confirmed" else []))
     return out
 
 
@@ -83,16 +133,26 @@ def from_tips(board: list[dict]) -> list[dict]:
     out = []
     for b in board:
         g = b.get("gate") or {}
-        why = ("ירד בגלל התיקון לריבוי מקורות" if g.get("downgraded") else
-               {"reliable": "50+ טיפים, 60%+ ניצחו את SPY אחרי עלות, שרד את התיקון",
-                "promising": "55%+ וחיובי, עוד לא מוכח",
-                "not_reliable": "מפסיד ל-SPY אחרי עלויות",
-                "collecting": f"{g.get('n') or 0} טיפים נמדדו (צריך 30 כדי לשפוט)"}.get(g.get("status"), ""))
+        status = {"reliable": "confirmed", "promising": "validating", "not_reliable": "failed"}.get(g.get("status"), "insufficient")
+        why = ("FAILED: ירד בגלל התיקון לריבוי מקורות" if g.get("downgraded") else
+               {"confirmed": "50+ טיפים, 60%+ ניצחו את SPY אחרי עלות, שרד את התיקון. עדיין לא הבטחה לרווח",
+                "validating": "55%+ וחיובי עד עכשיו, עוד לא מוכח",
+                "failed": "FAILED: מפסיד ל-SPY אחרי עלויות",
+                "insufficient": f"INSUFFICIENT DATA: {g.get('n') or 0} טיפים נמדדו (צריך 30 כדי לשפוט)"}[status])
+        if g.get("downgraded"):
+            status = "failed"
+        missing = []
+        if (g.get("n") or 0) < 50:
+            missing.append(f"50 טיפים (יש {g.get('n') or 0})")
+        if (g.get("success_rate") or 0) < 0.60:
+            missing.append("60%+ ניצחו את SPY")
         out.append(_e(engine="sources", kind="measured", id=f"src:{b['source']}", label=b["source"],
                       version="tips gate", updated=b.get("last_tip"), data="Telegram / SEC / manual, Yahoo daily",
-                      n=g.get("n"), success=g.get("success_rate"), mean_net=g.get("edge_after_cost"),
-                      mean_lo95=g.get("edge_lo95"), unit="ל-5 ימים, מול SPY אחרי עלות",
-                      benchmark="SPY באותם 5 ימים", verdict=g.get("status"), why=why))
+                      n=g.get("n"), clusters=g.get("symbols"), success=g.get("success_rate"),
+                      mean_net=g.get("edge_after_cost"), mean_lo95=g.get("edge_lo95"),
+                      unit="ל-5 ימים, מול SPY אחרי עלות", avg_win=g.get("avg_win"), avg_loss=g.get("avg_loss"),
+                      benchmark="SPY באותם 5 ימים", verdict=g.get("status"), status=status, why=why,
+                      missing=missing if status != "confirmed" else []))
     return out
 
 
@@ -107,9 +167,10 @@ def from_etf(report: dict | None, updated=None) -> list[dict]:
                       version="etf_paper_v2 (frozen)", updated=updated, data="Yahoo daily ETF bars, intents sealed pre-open",
                       n=trades, success=a.get("win_rate"),
                       mean_net=(a.get("return") - spy.get("return")) if a.get("return") is not None and spy.get("return") is not None else None,
-                      unit="תשואה כוללת מול SPY", max_drawdown=a.get("max_drawdown"),
+                      unit="תשואה כוללת מול SPY", max_drawdown=a.get("max_drawdown"), dd_note="חשבון מדומה",
                       benchmark=f"SPY בהחזקה ({(spy.get('return') or 0) * 100:+.1f}%)", verdict="collecting",
-                      why="ניסוי של חצי שנה עד 16.4.2027; נשפט בסוף"))
+                      status="validating" if trades else "insufficient",
+                      why="ניסוי של חצי שנה עד 16.4.2027; נשפט בסוף", missing=["סוף הניסוי (16.4.2027)"]))
     return out
 
 
@@ -123,21 +184,28 @@ def from_polymarket(report: dict | None, updated=None) -> list[dict]:
             continue
         ot = wf.get("oos_trading") or {}
         ci = ot.get("ci") or [None, None]
+        verdict = wf.get("verdict")
+        status = {"supported": "candidate", "oos_positive_needs_execution_check": "candidate",
+                  "insufficient_data": "insufficient"}.get(verdict, "failed")
+        missing = ["מעקב קדימה במחיר הקנייה האמיתי מספר הפקודות"]
+        if verdict == "oos_positive_needs_execution_check":
+            missing.insert(0, "אימות ביצוע: מחיר שאפשר באמת לקנות בו, לא מחיר אמצע")
         out.append(_e(engine="polymarket", kind="historical", id=f"pm:wf:{h}", label=f"כללי טווח מחיר, {h} שעות לפני הסגירה",
                       version="walk-forward v1 + taker fees", updated=updated,
                       data="Polymarket price history (mid/last trade, not executable)",
-                      n=ot.get("events"), mean_net=ot.get("mean_return"), mean_lo95=ci[0], unit="לכל דולר",
-                      benchmark="מחיר השוק כתחזית", verdict=wf.get("verdict"),
-                      why={"insufficient_data": "אין מספיק שווקים מוכרעים עם היסטוריה",
-                           "not_supported": "אף כלל לא הרוויח מחוץ למדגם אחרי עלויות",
-                           "oos_positive_needs_execution_check": "חיובי מחוץ למדגם; צריך אימות בספרי פקודות חיים",
-                           "supported": "עבר את כל השערים כולל ביצוע"}.get(wf.get("verdict"), "")))
+                      n=ot.get("events"), clusters=ot.get("events"), mean_net=ot.get("mean_return"), mean_lo95=ci[0],
+                      unit="לכל דולר, אחרי עמלת taker", benchmark="מחיר השוק כתחזית", verdict=verdict, status=status,
+                      why={"insufficient_data": "INSUFFICIENT DATA: אין מספיק שווקים מוכרעים עם היסטוריה",
+                           "not_supported": "FAILED: אף כלל לא הרוויח מחוץ למדגם אחרי עלויות",
+                           "oos_positive_needs_execution_check": "חיובי מחוץ למדגם על מחירי אמצע — לא הוכח שאפשר לבצע",
+                           "supported": "עבר את השערים ההיסטוריים; השערה עד מעקב קדימה"}.get(verdict, ""),
+                      missing=missing))
     return out
 
 
 def summarize(entries: list[dict]) -> dict:
     out: dict = {}
     for e in entries:
-        s = out.setdefault(e["engine"], {"passed": 0, "promising": 0, "failed": 0, "collecting": 0})
+        s = out.setdefault(e["engine"], {k: 0 for k in STATUSES})
         s[e["status"]] += 1
     return out
