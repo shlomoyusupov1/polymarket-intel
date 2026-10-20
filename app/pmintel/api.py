@@ -422,20 +422,28 @@ def virtual_portfolio(scope: str = "all"):
     for r in rows:
         m = CRYPTO if r["strategy"].startswith("crypto:") else STOCKS
         r["sealed_ok"] = r["recorded_at"] < LP.deadline(str(r["signal_day"]), m)
-    entries = performance()["entries"]
-    ok = {e["id"].split(":", 1)[1] for e in entries if e["id"].startswith("lab:") and e["status"] == "candidate"}
-    ok |= {e["id"].split(":", 1)[1] for e in entries if e["id"].startswith("fwd:") and e["status"] == "confirmed"}
     labs = {"": (lab_latest() or {}).get("result") or {}, "crypto:": (lab_latest("crypto") or {}).get("result") or {}}
     labels = {pre + k: v.get("label", k) for pre, rep in labs.items() for k, v in (rep.get("strategies") or {}).items()}
     with db.connect() as c:
         s = plans.get_settings(c)
     L = plans.limits(s)
-    res = PF.replay(rows, L["budget"], L["max_position_usd"], L["max_open"],
-                    allowed=(lambda k: k in ok) if scope == "proven" else None)
+    # The lab has NO stop on its long-only paper trades. Limit a position to
+    # the owner's full-loss budget, not the far larger exposure limit.
+    cap = min(L["max_position_usd"], L["risk_usd"])
+    # Eligibility is the status CAPTURED WITH THE SIGNAL, not the latest
+    # backtest verdict applied retroactively to yesterday's trades.
+    res = PF.replay(rows, L["budget"], cap, L["max_open"],
+                    eligible_at_signal=(lambda r: r.get("lab_verdict") == "forward_confirmed")
+                    if scope == "proven" else None)
     for p in res["positions"]:
         p["label"] = labels.get(p["strategy"], p["strategy"])
+    proven = sorted({r["strategy"] for r in rows if r.get("lab_verdict") == "forward_confirmed"
+                     and r.get("sealed_ok")})
     return {**res, "history": PF.history(rows, res["decisions"], labels)[:300], "limits": L, "scope": scope,
-            "decisions": None, "proven_strategies": sorted(ok)}
+            "position_cap_usd": cap,
+            "simulation_note": "מה היה קורה לפי ההגדרות של היום — לא יומן החלטות היסטורי נעול.",
+            "risk_note": "לשיטות ללא עצירה, ההקצאה מוגבלת להפסד מלא אפשרי של התקציב לסיכון בעסקה.",
+            "decisions": None, "proven_strategies": proven}
 
 
 def _opps():
