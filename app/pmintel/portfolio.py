@@ -45,6 +45,7 @@ def replay(rows: list[dict], budget: float, max_position: float, max_open: int,
         if allowed and not allowed(r["strategy"]):
             continue
         if eligible_at_signal and not eligible_at_signal(r):
+            decisions[r["id"]] = ("skipped", "השיטה לא אומתה קדימה בזמן האיתות")
             continue
         rid, strategy = r["id"], r["strategy"]
         base = strategy.split(":")[-1]
