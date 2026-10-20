@@ -74,8 +74,8 @@ def size(s: dict, price: float, stop: float | None = None, typical_loss: float |
     notes, ok = [], True
     if not price or price <= 0:
         return {"ok": False, "notes": ["אין מחיר עדכני, אז אי אפשר לחשב גודל עסקה."]}
-    position = L["max_position_usd"]
-    by = "תקרה"
+    position = L["max_position_usd"] if stop is not None else min(L["max_position_usd"], L["risk_usd"])
+    by = "תקרת הפסד מלא" if stop is None else "תקרה"
     if stop is not None:
         if stop >= price:
             return {"ok": False, "notes": ["מחיר העצירה חייב להיות מתחת למחיר הכניסה."]}
@@ -96,14 +96,20 @@ def size(s: dict, price: float, stop: float | None = None, typical_loss: float |
         fee_rt = 2 * one
     planned_loss = (units * (price - stop) + (fee_rt or 0)) if stop is not None else None
     bad_case = position * abs(typical_loss) + (fee_rt or 0) if typical_loss is not None and stop is None else None
+    max_loss_without_stop = position + (fee_rt or 0) if stop is None else None
+    if (planned_loss is not None and planned_loss > L["risk_usd"] + 1e-9) or (
+            max_loss_without_stop is not None and max_loss_without_stop > L["risk_usd"] + 1e-9):
+        ok = False
+        notes.append("עלות העסקה וההפסד האפשרי חורגים ממגבלת הסיכון. אין לבצע לפי גודל זה.")
     notes.append(f"הסכום לעסקה: {position:,.2f}$ מתוך {s['budget']:,.0f}$ — "
                  + ("מוגבל לפי כמה מותר להפסיד אם העצירה תופעל." if by == "סיכון"
+                    else "מוגבל להפסד מלא אפשרי כי לא הוגדרה עצירה." if by == "תקרת הפסד מלא"
                     else f"התקרה לעסקה אחת בפרופיל {L['profile_label']} ({L['max_position_pct']:.0%} מהתקציב)."))
     if stop is not None:
         notes.append(f"אם יוצאים בעצירה ({stop:,.2f}$) ההפסד המתוכנן הוא בערך {planned_loss:,.2f}$, "
                      f"והמגבלה שלך היא {L['risk_usd']:,.2f}$ לעסקה. בפער פתיחה או בתנועה חדה היציאה יכולה להיות במחיר גרוע יותר.")
     else:
-        notes.append("לא הוגדרה עצירת הפסד, אז ההפסד לא חסום מראש. היציאה היא לפי זמן.")
+        notes.append(f"לא הוגדרה עצירת הפסד. הפסד מלא אפשרי של עד {position:,.2f}$ לפני עלויות; ההקצאה מוגבלת בהתאם. היציאה היא לפי זמן.")
         if bad_case is not None:
             notes.append(f"בעסקה מפסידה טיפוסית של השיטה הזו (בבדיקה על העבר) ההפסד היה בערך {bad_case:,.2f}$ על הסכום הזה.")
     if fee_rt is None:
@@ -115,7 +121,8 @@ def size(s: dict, price: float, stop: float | None = None, typical_loss: float |
             ok = False
             notes.append("העמלה גבוהה מ-1% מהסכום. עסקה קצרה כזו לא מעשית בתקציב הזה.")
     return {"ok": ok, "position_usd": position, "units": units, "sized_by": by, "fee_round_trip": fee_rt,
-            "planned_loss": planned_loss, "bad_case_loss": bad_case, "cash_left": s["budget"] - position,
+            "planned_loss": planned_loss, "bad_case_loss": bad_case, "max_loss_without_stop": max_loss_without_stop,
+            "cash_left": s["budget"] - position,
             "limits": L, "notes": notes}
 
 
