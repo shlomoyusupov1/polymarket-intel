@@ -340,6 +340,38 @@ def agents_room():
     return {"agents": A.build(jobs, f), "feed": feed}
 
 
+class FollowIn(BaseModel):
+    text: str
+
+
+@app.get("/api/follows")
+def follows_list():
+    from . import follows
+    with db.connect() as c:
+        return follows.listing(c)
+
+
+@app.post("/api/follows")
+def follows_add(body: FollowIn):
+    from . import follows
+    try:
+        with db.connect() as c:
+            return follows.add(c, body.text)
+    except follows.FollowError as e:
+        raise HTTPException(400, str(e)) from None
+    except Exception as e:  # noqa: BLE001 - upstream (Gamma / Yahoo) unreachable
+        raise HTTPException(502, "לא הצלחתי לקרוא את המחיר כרגע. נסה שוב בעוד דקה.") from e
+
+
+@app.delete("/api/follows/{fid}")
+def follows_remove(fid: int):
+    from . import follows
+    with db.connect() as c:
+        if not follows.remove(c, fid):
+            raise HTTPException(404, "not found")
+    return {"ok": True}
+
+
 def _market(name: str):
     from . import cryptolab, stocklab
     if name not in ("stocks", "crypto"):

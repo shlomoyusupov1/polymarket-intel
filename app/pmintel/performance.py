@@ -86,14 +86,14 @@ def from_stocklab(report: dict | None, updated=None, engine: str = "stocks") -> 
 def _lab_why(v: dict, bench: str = "SPY") -> str:
     side = " (נר אזהרה: נמדד אם הנכס פיגר אחרי האיתות)" if v.get("side") == -1 else ""
     if v.get("verdict") == "insufficient_data":
-        return f"INSUFFICIENT DATA: רק {v.get('n') or 0} עסקאות מחוץ למדגם (צריך 50){side}"
+        return f"רק {v.get('n') or 0} עסקאות מחוץ למדגם (צריך 50){side}"
     if v.get("verdict") == "candidate_for_paper":
         return f"עברה על העבר מול {bench} וקנייה אקראית, ושרדה את התיקון. השערה בלבד עד שתוכח קדימה{side}"
     if v.get("verdict") == "edge_below_target":
-        return f"FAILED: יש יתרון קטן מעל אקראי, אבל פחות מ-60% הצלחה{side}"
+        return f"יש יתרון קטן מעל אקראי, אבל פחות מ-60% הצלחה{side}"
     if (v.get("edge_lo95") or 0) > 0:
-        return f"FAILED: גבול תחתון חיובי, אבל לא שורד את התיקון לבדיקת הרבה שיטות{side}"
-    return f"FAILED: אין יתרון על קנייה אקראית אחרי עלויות{side}"
+        return f"גבול תחתון חיובי, אבל לא שורד את התיקון לבדיקת הרבה שיטות{side}"
+    return f"אין יתרון על קנייה אקראית אחרי עלויות{side}"
 
 
 def from_lab_forward(summary: dict, lab_report: dict | None, engine: str = "stocks") -> list[dict]:
@@ -114,7 +114,7 @@ def from_lab_forward(summary: dict, lab_report: dict | None, engine: str = "stoc
         if v["status"] == "confirmed" and hist == "candidate_for_paper":
             status, why = "confirmed", f"עברה על העבר וגם קדימה: 50+ עסקאות, 60%+ ניצחו את {b} אחרי עלות. עדיין לא הבטחה לרווח"
         elif v["status"] == "not_confirmed":
-            status, why = "failed", "FAILED: 50+ עסקאות קדימה והשער לא הושג"
+            status, why = "failed", "50+ עסקאות קדימה והשער לא הושג"
         else:
             status = "validating"
             why = (f"{v['n']} עסקאות קדימה עד עכשיו (צריך 50)" if v["n"] < 50
@@ -134,11 +134,11 @@ def from_tips(board: list[dict]) -> list[dict]:
     for b in board:
         g = b.get("gate") or {}
         status = {"reliable": "confirmed", "promising": "validating", "not_reliable": "failed"}.get(g.get("status"), "insufficient")
-        why = ("FAILED: ירד בגלל התיקון לריבוי מקורות" if g.get("downgraded") else
+        why = ("ירד בגלל התיקון לריבוי מקורות" if g.get("downgraded") else
                {"confirmed": "50+ טיפים, 60%+ ניצחו את SPY אחרי עלות, שרד את התיקון. עדיין לא הבטחה לרווח",
                 "validating": "55%+ וחיובי עד עכשיו, עוד לא מוכח",
-                "failed": "FAILED: מפסיד ל-SPY אחרי עלויות",
-                "insufficient": f"INSUFFICIENT DATA: {g.get('n') or 0} טיפים נמדדו (צריך 30 כדי לשפוט)"}[status])
+                "failed": "מפסיד ל-SPY אחרי עלויות",
+                "insufficient": f"{g.get('n') or 0} טיפים נמדדו (צריך 30 כדי לשפוט)"}[status])
         if g.get("downgraded"):
             status = "failed"
         missing = []
@@ -195,8 +195,8 @@ def from_polymarket(report: dict | None, updated=None) -> list[dict]:
                       data="Polymarket price history (mid/last trade, not executable)",
                       n=ot.get("events"), clusters=ot.get("events"), mean_net=ot.get("mean_return"), mean_lo95=ci[0],
                       unit="לכל דולר, אחרי עמלת taker", benchmark="מחיר השוק כתחזית", verdict=verdict, status=status,
-                      why={"insufficient_data": "INSUFFICIENT DATA: אין מספיק שווקים מוכרעים עם היסטוריה",
-                           "not_supported": "FAILED: אף כלל לא הרוויח מחוץ למדגם אחרי עלויות",
+                      why={"insufficient_data": "אין מספיק שווקים מוכרעים עם היסטוריה",
+                           "not_supported": "אף כלל לא הרוויח מחוץ למדגם אחרי עלויות",
                            "oos_positive_needs_execution_check": "חיובי מחוץ למדגם על מחירי אמצע — לא הוכח שאפשר לבצע",
                            "supported": "עבר את השערים ההיסטוריים; השערה עד מעקב קדימה"}.get(verdict, ""),
                       missing=missing))

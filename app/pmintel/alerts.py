@@ -131,7 +131,14 @@ def gather(conn) -> tuple[dict, dict]:
 def check(conn, now: datetime | None = None) -> list[str]:
     now = now or datetime.now(timezone.utc)
     jobs, facts = gather(conn)
-    return diff(conn, problems(jobs, facts, now), good_news(facts), now)
+    msgs = diff(conn, problems(jobs, facts, now), good_news(facts), now)
+    try:
+        from . import follows
+        msgs += follows.check(conn, now)
+    except Exception:  # noqa: BLE001 - follows must never block system alerts
+        import logging
+        logging.getLogger("pmintel.alerts").exception("follow check failed")
+    return msgs
 
 
 # ---------------------------------------------------------------- daily morning digest
