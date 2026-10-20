@@ -1402,7 +1402,7 @@ PAGES.portfolio = async (view) => {
   const d = await api("/api/portfolio?scope=" + pfScope);
   if (current !== "portfolio") return;
   const L = d.limits;
-  const seg = h("div", { class: "seg", role: "group", "aria-label": "אילו שיטות" }, [["all", "כל השיטות (ללמידה)"], ["proven", "רק שיטות שעברו"]].map(([v, l]) =>
+  const seg = h("div", { class: "seg", role: "group", "aria-label": "אילו שיטות" }, [["all", "כל השיטות (ללמידה)"], ["proven", "רק שיטות שאומתו בזמן האיתות"]].map(([v, l]) =>
     h("button", { type: "button", "aria-pressed": String(pfScope === v), onclick: () => { pfScope = v; route(); } }, l)));
   const tile = (k, v, note) => h("div", { class: "reason" }, h("div", { class: "k" }, k), h("div", { class: "v" }, v), note ? h("div", { class: "d" }, note) : null);
   const bench = d.closed ? d.bench_same_trades : null;
@@ -1416,9 +1416,9 @@ PAGES.portfolio = async (view) => {
       tile("מזומן פנוי", ltr("$" + d.cash.toFixed(2))),
       tile("רווח/הפסד ממומש", pmoney(d.realized), `${d.closed} עסקאות נסגרו, ${d.wins} ברווח`),
       tile("רווח/הפסד לא ממומש", pmoney(d.unrealized), `${d.positions.length} פתוחות`),
-      tile("ירידה מרבית", d.max_drawdown == null ? "—" : pct1(d.max_drawdown), "על עסקאות שנסגרו"),
+      tile("ירידה מרבית", d.max_drawdown == null ? "לא נמדדה" : pct1(d.max_drawdown), d.drawdown_note || "על בסיס סימון יומי של התיק"),
       tile("מול המדד באותן עסקאות", bench == null ? "—" : pmoney(d.realized - bench), bench == null ? "עוד אין עסקאות סגורות" : "רווח התיק פחות מה שהמדד היה נותן על אותו סכום")),
-    card("עסקאות פתוחות", `עד ${L.max_open} בבת אחת, עד $${L.max_position_usd.toFixed(2)} לכל אחת (לפי הפרופיל שלך)`,
+    card("עסקאות פתוחות", `עד ${L.max_open} בבת אחת, עד ${d.position_cap_usd.toFixed(2)} לכל אחת (ללא סטופ: תקרת ההפסד המלא)`,
       d.positions.length ? h("div", { class: "scroll-x" }, h("table", { class: "t" },
         h("thead", null, h("tr", null, ["נכס", "שיטה", "כניסה", "מחיר כניסה", "סכום", "יחידות", "מחיר נוכחי", "רווח/הפסד", "יציאה"].map((x) => h("th", null, x)))),
         h("tbody", null, d.positions.map((p) => h("tr", null, h("td", null, ltr(p.symbol.replace("-USD", ""))), h("td", null, p.label),
@@ -1427,18 +1427,18 @@ PAGES.portfolio = async (view) => {
           h("td", null, pmoney(p.pnl), " ", pct1(p.pnl_pct)), h("td", null, `לפי זמן: אחרי ${p.hold} ימים · בלי יעד ובלי עצירה`))))))
         : empty("אין עסקאות פתוחות.")),
     h("p", null, h("a", { href: "#/history" }, "כל ההחלטות: מה נכנס, מה דולג ולמה")),
-    h("p", { class: "faint" }, "כניסה במחיר הפתיחה שנרשם בפועל, יציאה לפי זמן, ועלות מסחר משוערת בכל עסקה. עסקה פתוחה מוערכת לפי המחיר האחרון שנבדק.")));
+    h("p", { class: "faint" }, d.simulation_note + " " + d.risk_note + " מחירי הפוזיציות הפתוחות אינם בהכרח מחירים בזמן אמת.")));
 };
 PAGES.history = async (view) => {
   const d = await api("/api/portfolio?scope=" + pfScope);
   if (current !== "history") return;
   const DEC = { "נכנס לתיק": "ok", "דילוג": "wait", "לא בתיק": "", "ממתין לכניסה": "info" };
   view.replaceChildren(h("div", { class: "stack" },
-    h("p", null, `לפי ${pfScope === "all" ? "תיק התרגול (כל השיטות)" : "התיק של שיטות שעברו"}. ${d.history.length} איתותים.`),
+    h("p", null, `סימולציה לפי ההגדרות הנוכחיות — לא יומן החלטות נעול. ${d.history.length} איתותים.`),
     d.history.length ? h("ul", { class: "hist" }, d.history.map((x) => h("li", { class: "card" },
       h("div", { class: "row-between" }, h("strong", null, ltr(x.symbol.replace("-USD", "")), " · ", x.strategy), h("span", { class: "badge " + (DEC[x.decision] || "") }, x.decision)),
       h("div", { class: "faint" }, "זוהה ביום המסחר ", ltr(String(x.signal_day)), " · נרשם ", when(x.recorded_at),
-        x.sealed_before_entry ? " · נחתם לפני הכניסה ✓" : " · נרשם מאוחר — לא נחשב"),
+        x.sealed_before_entry ? " · זמן הרישום קודם למועד הכניסה לפי מסד הנתונים (לא אימות זמן חיצוני)" : " · נרשם מאוחר — אינו נחשב"),
       h("div", null, x.why),
       x.entry_day ? h("div", null, "כניסה מדומה: ", ltr(String(x.entry_day)), " ב-", ltr(usd2(x.entry_price)),
         x.exit_day ? [" · יציאה: ", ltr(String(x.exit_day)), ` (לפי זמן, אחרי ${x.hold} ימים)`] : " · עדיין פתוחה") : null,
