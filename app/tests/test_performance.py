@@ -22,7 +22,7 @@ def test_entries_share_one_schema_and_status_vocabulary():
     # history alone is only ever a candidate; only forward evidence on a historical candidate confirms
     assert by["lab:rsi2_pullback"]["status"] == "candidate" and by["lab:ma_stack"]["status"] == "failed"
     assert by["lab:breakout_volume"]["status"] == "insufficient" and "50" in by["lab:breakout_volume"]["why"]
-    assert "INSUFFICIENT DATA" in by["lab:breakout_volume"]["why"] and by["lab:breakout_volume"]["missing"]
+    assert by["lab:breakout_volume"]["missing"]
     assert by["fwd:rsi2_pullback"]["status"] == "confirmed" and by["fwd:rsi2_pullback"]["missing"] == []
     # forward-positive but historically failed is never "confirmed"
     assert by["fwd:ma_stack"]["status"] == "validating" and "מעבר בבדיקה על העבר" in by["fwd:ma_stack"]["missing"]

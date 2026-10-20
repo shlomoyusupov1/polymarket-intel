@@ -105,11 +105,13 @@ function starBtn(id) {
 const ROUTES = [
   { id: "home", path: "#/", label: "היום", short: "היום", icon: "home", primary: true, bottom: true,
     lead: "תשובה אחת: יש היום משהו שהנתונים תומכים בו? ולמה." },
-  { id: "stocks", path: "#/stocks", label: "מניות", short: "מניות", icon: "lab", primary: true, bottom: true,
+  { id: "follow", path: "#/follow", label: "המעקב שלי", short: "מעקב", icon: "star", primary: true, bottom: true,
+    lead: "הדבק קישור מ-Polymarket או כתוב סימול של מניה או מטבע. תקבל הודעה בטלגרם כשהמחיר זז." },
+  { id: "stocks", path: "#/stocks", label: "מניות", short: "מניות", icon: "lab",
     lead: "מה קורה בשוק עכשיו, ואיזה תחומים עולים או יורדים. זה מידע, לא המלצה." },
   { id: "evidence", path: "#/evidence", label: "המניות שלי", section: "stocks",
     lead: "כל מה שידוע על המניות שאתה עוקב אחריהן: דיווחים רשמיים, טיפים, מחיר לפני ואחרי, ומה עוד לא ידוע." },
-  { id: "check", path: "#/check", label: "בדיקת מניה", section: "stocks",
+  { id: "check", path: "#/check", label: "בדיקת מניה", short: "בדיקה", icon: "search", primary: true, bottom: true,
     lead: "קיבלת טיפ? הכנס סימול ותראה אם יש סימנים לניפוח מחיר לפני שאתה קונה." },
   { id: "lab", path: "#/lab", label: "מעבדה", section: "stocks",
     lead: "כאן בודקים אם שיטות מסחר מוכרות היו מרוויחות ב-10 השנים האחרונות. שיטה שלא הוכחה — לא משתמשים בה." },
@@ -117,9 +119,9 @@ const ROUTES = [
     lead: "כל מקור טיפים נמדד מול SPY. מקור מקבל \"אמין\" רק אחרי 50 טיפים ו-60% הצלחה שאינה מקרית." },
   { id: "etf", path: "#/etf", label: "חדר מסחר", section: "stocks",
     lead: "שתי אסטרטגיות על קרנות סל, בכסף מדומה, מול פשוט להחזיק את SPY. הכללים נקבעו מראש." },
-  { id: "crypto", path: "#/crypto", label: "קריפטו", short: "קריפטו", icon: "coin", primary: true, bottom: true,
+  { id: "crypto", path: "#/crypto", label: "קריפטו", short: "קריפטו", icon: "coin",
     lead: "אותן בדיקות כמו במניות, על 20 מטבעות גדולים. כל שיטה צריכה לנצח פשוט להחזיק ביטקוין, אחרי עמלות." },
-  { id: "pm", path: "#/pm", label: "Polymarket", short: "Polymarket", icon: "list", primary: true, bottom: true,
+  { id: "pm", path: "#/pm", label: "Polymarket", short: "Polymarket", icon: "list",
     lead: "מה זה Polymarket, איך מרוויחים ומפסידים בו, ומה המערכת שלנו בודקת לפני שהיא אומרת משהו." },
   { id: "pmoverview", path: "#/pm/overview", label: "סקירה", section: "pm", lead: "מה זז, מה מושך כסף, והאם יש הזדמנות שנתמכת בנתונים." },
   { id: "markets", path: "#/markets", label: "כל השווקים", section: "pm", lead: "חיפוש וסינון של השווקים הפתוחים. לחיצה על שוק פותחת הסבר מלא." },
@@ -133,7 +135,7 @@ const ROUTES = [
   { id: "system", path: "#/system", label: "מערכת", short: "מערכת", icon: "pulse", lead: "האם האיסוף רץ, מה נכשל, ומתי עודכן כל דבר." },
   { id: "more", path: "#/more", label: "עוד", short: "עוד", icon: "more", primary: true, bottom: true, lead: "שאר המסכים." },
 ];
-const STOCK_TABS = ["stocks", "evidence", "check", "lab", "tips", "etf"];
+const STOCK_TABS = ["stocks", "evidence", "lab", "tips", "etf"];
 const PM_TABS = ["pm", "pmoverview", "markets", "scanner", "research", "watchlist"];
 function buildNav() {
   const top = $("#top-nav"), bottom = $("#bottom-nav");
@@ -359,7 +361,9 @@ PAGES.detail = async (view, id) => {
       h("h1", { dir: "auto" }, m.question),
       h("div", { class: "detail-actions" }, status, until(m.end_date) ? h("span", { class: "badge" }, until(m.end_date)) : null,
         m.neg_risk ? h("span", { class: "badge info" }, "חלק מקבוצת תוצאות") : null,
-        starBtn(m.id), url ? h("a", { class: "btn", href: url, target: "_blank", rel: "noopener noreferrer" }, "פתח ב-Polymarket", icon("ext", 16)) : null)),
+        url ? h("button", { class: "btn primary", type: "button", onclick: async (ev) => { const b = ev.currentTarget; b.disabled = true;
+          try { await apiSend("POST", "/api/follows", { text: url }); b.textContent = "במעקב ✓"; } catch (e) { b.disabled = false; alert(e.message); } } }, "עקוב בטלגרם") : null,
+        url ? h("a", { class: "btn", href: url, target: "_blank", rel: "noopener noreferrer" }, "פתח ב-Polymarket", icon("ext", 16)) : null)),
     h("div", { class: "cols-main" },
       h("div", { class: "stack" },
         plainMarket(m),
@@ -381,7 +385,7 @@ PAGES.detail = async (view, id) => {
       h("div", { class: "stack" },
         h("section", { class: "card reco" },
           h("div", { class: "sub" }, "המלצה"),
-          h("div", { class: "detail-actions" }, h("span", { class: "badge wait", style: "font-size:15px;padding:6px 14px" }, "WAIT · המתן")),
+          h("div", { class: "detail-actions" }, h("span", { class: "badge wait", style: "font-size:15px;padding:6px 14px" }, "לא לקנות כרגע")),
           h("div", { style: "font-size:15px" }, m.reason),
           h("div", { class: "section-title" }, "מגבלות"),
           h("ul", { class: "clean" },
@@ -797,6 +801,61 @@ PAGES.etf = async (view) => {
         h("li", null, "חלקי מניות (0.001) — כך שגם QQQ יקרה אפשרית. עצירת כניסות בירידה של 8% מהשיא.")))));
 };
 
+// ---- המעקב שלי (Follow) ----
+async function apiSend(method, path, body) {
+  const r = await fetch(path, { method, headers: { "Content-Type": "application/json", Accept: "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || `שגיאה ${r.status}`);
+  return d;
+}
+const followPrice = (f, x) => f.kind === "polymarket" ? Math.round(x.price * 100) + "%" : "$" + Number(x.price).toLocaleString("en", { maximumFractionDigits: x.price < 10 ? 4 : 2 });
+function followChange(f, x) {
+  if (x.since_start == null || Math.abs(x.since_start) < 1e-9) return h("span", { class: "faint" }, "לא זז מאז שהתחלת");
+  if (f.kind === "polymarket") { const d = Math.round(x.since_start * 100);
+    return d === 0 ? h("span", { class: "faint" }, "כמעט לא זז") : h("span", { class: d > 0 ? "up" : "down" }, `${d > 0 ? "עלה" : "ירד"} ${Math.abs(d)} נקודות מאז שהתחלת`); }
+  const first = x.price - x.since_start, pc = first ? x.since_start / first * 100 : 0;
+  return h("span", { class: pc > 0 ? "up" : "down" }, `${pc > 0 ? "עלה" : "ירד"} ${Math.abs(pc).toFixed(1)}% מאז שהתחלת`);
+}
+function followBox(onChange) {
+  const q = h("input", { type: "text", placeholder: "קישור או סימול, למשל AMD", "aria-label": "מה לעקוב", dir: "auto", autocomplete: "off" });
+  const msg = h("p", { class: "form-msg", role: "status" });
+  const btn = h("button", { class: "btn primary", type: "submit" }, "עקוב");
+  const go = async (ev) => {
+    ev.preventDefault();
+    const text = q.value.trim(); if (!text) return;
+    btn.disabled = true; msg.className = "form-msg"; msg.textContent = "בודק…";
+    try { const f = await apiSend("POST", "/api/follows", { text }); q.value = ""; msg.textContent = `נוסף: ${f.label}. תקבל הודעה בטלגרם כשהמחיר זז.`; onChange && onChange(); }
+    catch (e) { msg.className = "form-msg err"; msg.textContent = e.message; }
+    finally { btn.disabled = false; }
+  };
+  return h("div", null, h("form", { class: "quick", onsubmit: go }, q, btn), msg);
+}
+function followList(list, onChange, compact) {
+  if (!list.length) return empty("עוד לא הוספת כלום. הדבק למעלה קישור לשוק ב-Polymarket, או כתוב סימול של מניה או מטבע.");
+  return h("ul", { class: "follows" }, list.map((f) => {
+    const items = compact ? f.state.slice(0, 3) : f.state;
+    const stop = h("button", { class: "btn small", type: "button", onclick: async () => { stop.disabled = true;
+      try { await apiSend("DELETE", "/api/follows/" + f.id); onChange && onChange(); } catch (e) { stop.disabled = false; alert(e.message); } } }, "הפסק לעקוב");
+    return h("li", null,
+      h("div", { class: "row-between" }, h("a", { class: "flabel", href: f.url || "#/follow", target: "_blank", rel: "noopener noreferrer", dir: "auto" }, f.label), compact ? null : stop),
+      h("ul", { class: "fitems" }, items.map((x) => h("li", null, h("span", { class: "n", dir: "auto" }, x.name),
+        h("strong", null, ltr(followPrice(f, x))), followChange(f, x)))),
+      compact && f.state.length > 3 ? h("div", { class: "faint" }, `ועוד ${f.state.length - 3}`) : null,
+      f.last_error ? h("div", { class: "faint" }, "הבדיקה האחרונה לא הצליחה, ננסה שוב בעוד רבע שעה.") : null,
+      compact ? null : h("div", { class: "faint" }, `נוסף ${dateHe(f.created_at)}` + (f.alerted_at ? ` · הודעה אחרונה ${ago(f.alerted_at)}` : " · עוד לא נשלחה הודעה")));
+  }));
+}
+PAGES.follow = async (view) => {
+  const box = h("div", null, skel(2));
+  const load = async () => { const l = await api("/api/follows").catch(() => null);
+    box.replaceChildren(l ? followList(l, load) : empty("לא הצלחתי לקרוא את רשימת המעקב מהשרת.")); };
+  view.replaceChildren(h("div", { class: "stack" },
+    card("עקוב אחרי משהו", "עובד על המחשב ועל הטלפון. ההודעה מגיעה ל\"הודעות שמורות\" שלך בטלגרם.", followBox(load)),
+    box,
+    h("p", { class: "faint" }, "שוק ב-Polymarket: הודעה כשתוצאה זזה 5 נקודות או יותר. מניה או מטבע: כשהמחיר זז 5% או יותר. המעקב רק מדווח על מחירים. הוא לא קונה ולא ממליץ.")));
+  load();
+};
+
 // ---- היום (Today) ----
 const ENGINE = { stocks: "מניות", crypto: "קריפטו", polymarket: "Polymarket", sources: "קבוצות טיפים" };
 // the five research states, shared by every screen (see app/pmintel/performance.py)
@@ -868,11 +927,11 @@ function paperPicks(stk, cry, labs, entries) {
     .filter((r) => r.status !== "closed").slice(0, 8);
   if (!rows.length) return empty("היום לא נמצא כלום. איתותים נוצרים כל יום אחרי סגירת המסחר (קריפטו: אחרי חצות).");
   const DAY = { stocks: "ימי מסחר", crypto: "ימים" };
-  const why = (e) => !e ? "השיטה עוד לא נבדקה על העבר. WAIT."
+  const why = (e) => !e ? "השיטה עוד לא נבדקה על העבר."
     : e.status === "confirmed" ? "השיטה אומתה גם קדימה. שווה לעקוב; כסף אמיתי רק אחרי שיחה ובירור."
-    : e.status === "candidate" ? "השיטה רק מועמדת מהעבר. עוקבים כדי לבדוק אותה, לא כדי לקנות. WAIT."
-    : e.status === "insufficient" ? "אין מספיק נתונים על השיטה הזו. WAIT."
-    : "השיטה נכשלה בבדיקה על העבר. עוקבים רק כדי למדוד. WAIT.";
+    : e.status === "candidate" ? "השיטה רק מועמדת מהעבר. עוקבים כדי לבדוק אותה, לא כדי לקנות."
+    : e.status === "insufficient" ? "אין מספיק נתונים על השיטה הזו."
+    : "השיטה נכשלה בבדיקה על העבר. עוקבים רק כדי למדוד.";
   return h("ul", { class: "picks" }, rows.map((r) => { const e = statusOf(r.m, r.strategy);
     return h("li", null,
       h("a", { class: "sym", href: r.m === "stocks" ? "#/check/" + r.symbol : "#/crypto" }, ltr(r.symbol.replace("-USD", ""))),
@@ -883,41 +942,40 @@ function paperPicks(stk, cry, labs, entries) {
 }
 PAGES.home = async (view) => {
   if (homeTimer) { clearInterval(homeTimer); homeTimer = null; }
-  const [perf, ag, stk, cry, lab, clab] = await Promise.all(["/api/performance", "/api/agents", "/api/lab/paper", "/api/lab/paper?market=crypto",
-    "/api/lab/latest", "/api/lab/latest?market=crypto"].map((u) => api(u).catch(() => null)));
+  const [perf, ag, fl] = await Promise.all(["/api/performance", "/api/agents", "/api/follows"].map((u) => api(u).catch(() => null)));
   if (current !== "home") return;
   if (!perf && !ag) throw new Error("השרת לא מחזיר נתונים כרגע. נסה לרענן בעוד דקה.");
   const entries = perf ? perf.entries : [];
   const stage = ladderStage(entries);
   const today = new Date().toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long" });
-  const go = (ev) => { ev.preventDefault(); const v = q.value.trim().toUpperCase(); if (v) location.hash = "#/check/" + encodeURIComponent(v); };
-  const q = h("input", { type: "search", placeholder: "סימול, למשל AMD", "aria-label": "סימול לבדיקה", dir: "auto", autocomplete: "off" });
+  const tested = entries.filter((e) => e.engine !== "sources").length;
   const VERDICT = [
-    ["", "WAIT. היום לא מכניסים כסף.", "אף שיטה עוד לא הוכיחה יתרון. כשאין ראיות, ברירת המחדל היא להמתין."],
-    ["wait", "WAIT. יש השערה, עוד לא הוכחה.", "שיטה עברה בדיקה על העבר. עכשיו היא צריכה 50 עסקאות קדימה בכסף מדומה. זה לוקח כמה שבועות."],
-    ["go", "יש שיטה שאומתה גם קדימה.", "זה הרגע לדבר על סכום קטן, עם סטופ, ורק אחרי בירור עמלות, מס וחוק. שום דבר לא נקנה אוטומטית, ואימות אינו הבטחה לרווח."]][stage];
-  const steps = [["נבדקת על 10 שנות עבר", "האם השיטה הייתה מנצחת את המדד אחרי עמלות?"],
-    ["50 עסקאות בכסף מדומה", "השיטה בוחרת לפני שהמחיר זז, ואנחנו רואים מה קרה באמת."],
-    ["סכום קטן בכסף אמיתי", "רק אחרי שני השלבים. תקבל הודעה בטלגרם."]];
-  const ladder = h("ol", { class: "ladder" }, steps.map(([t, d], i) =>
-    h("li", { class: i < stage ? "done" : i === stage ? "now" : "" }, h("span", { class: "n", "aria-hidden": "true" }, i < stage ? "✓" : String(i + 1)),
-      h("div", null, h("strong", null, t), i === stage ? h("span", { class: "here" }, "אנחנו כאן") : null, h("div", { class: "faint" }, d)))));
-  const thoughts = h("ul", { class: "thoughts" }, Object.keys(ENGINE).map((k) => { const [c, line] = engineThought(k, entries);
-    return h("li", null, h("strong", null, h("span", { class: "dot " + c, "aria-hidden": "true" }), " ", ENGINE[k]), h("span", null, line)); }));
-  const agBox = h("div", null, agentsMini(ag));
+    ["", "היום לא קונים כלום.", `המערכת בדקה ${tested} שיטות ועוד לא מצאה אחת שמרוויחה יותר מהמדד. כשתמצא, תקבל הודעה.`],
+    ["wait", "היום לא קונים כלום.", "יש שיטה אחת שנראתה טוב על העבר. עכשיו בודקים אותה כמה שבועות בכסף מדומה לפני שסומכים עליה."],
+    ["go", "יש שיטה שעברה את כל הבדיקות.", "שווה לדבר על סכום קטן. שום דבר לא נקנה לבד."]][stage];
+  const flBox = h("div", null);
+  const loadFl = async () => { const l = await api("/api/follows").catch(() => null); if (l) flBox.replaceChildren(followList(l, loadFl, true)); };
+  flBox.replaceChildren(fl ? followList(fl, loadFl, true) : empty("לא הצלחתי לקרוא את רשימת המעקב."));
+  const sysLine = (d) => { if (!d) return empty("לא הצלחתי לקרוא את מצב המערכת.");
+    const bad = d.agents.filter((a) => a.state === "error" || a.state === "late");
+    const work = d.agents.filter((a) => a.state === "working");
+    return h("div", null,
+      h("p", { class: "sys " + (bad.length ? "down" : "up") }, h("span", { class: "dot " + (bad.length ? "bad" : "ok"), "aria-hidden": "true" }),
+        bad.length ? ` ${bad.length} חלקים לא עובדים: ${bad.map((a) => a.name).join(", ")}` : " הכל עובד."),
+      work.length ? h("p", { class: "faint" }, "עכשיו: " + work.map((a) => `${a.name} (${a.role})`).join(", ")) : null,
+      h("a", { href: "#/agents" }, "מה כל חלק עושה")); };
+  const sysBox = h("div", null, sysLine(ag));
   view.replaceChildren(h("div", { class: "stack" },
-    h("section", { class: "verdict " + VERDICT[0] }, h("div", { class: "when" }, today), h("h2", null, VERDICT[1]), h("p", null, VERDICT[2])),
-    card("מתי מכניסים כסף", "כל שיטה עוברת שלושה שלבים. אין קיצורי דרך.", ladder),
-    card("מה המערכת חושבת עכשיו", "שורה אחת לכל תחום, מתוך התוצאות האמיתיות", thoughts, h("a", { href: "#/performance" }, "לכל המספרים")),
-    card("מה המערכת מצאה היום", "כל ממצא, על איזו שיטה הוא נשען, ולמה לעקוב או להמתין. הכל בכסף מדומה.", paperPicks(stk, cry, { stocks: lab?.result, crypto: clab?.result }, entries)),
-    card("הסוכנים עכשיו", "מי עובד, מה הוא מצא, ומתי. מתעדכן לבד כל 30 שניות.", agBox, h("a", { href: "#/agents" }, "לחדר הסוכנים")),
-    card("קיבלת טיפ?", "תבדוק אותו לפני הכל. אדום = לא נוגעים.",
-      h("form", { class: "quick", onsubmit: go }, q, h("button", { class: "btn primary", type: "submit" }, "בדוק"))),
+    h("section", { class: "verdict " + VERDICT[0] }, h("div", { class: "when" }, today), h("h2", null, VERDICT[1]), h("p", null, VERDICT[2]),
+      h("p", null, h("a", { href: "#/performance" }, "מה נבדק ומה יצא"))),
+    card("המעקב שלך", "הדבק קישור או כתוב סימול. תקבל הודעה בטלגרם כשהמחיר זז.", followBox(loadFl), flBox,
+      h("a", { href: "#/follow" }, "לכל המעקב")),
+    card("המערכת", null, sysBox),
     h("p", { class: "faint" }, "אין כאן ייעוץ השקעות ואין מסחר בכסף אמיתי.")));
   homeTimer = setInterval(async () => {
     if (current !== "home") { clearInterval(homeTimer); homeTimer = null; return; }
     const d = await api("/api/agents").catch(() => null);
-    if (d && current === "home") agBox.replaceChildren(agentsMini(d));
+    if (d && current === "home") sysBox.replaceChildren(sysLine(d));
   }, 30000);
 };
 
@@ -946,7 +1004,7 @@ PAGES.pm = async (view) => {
         h("li", null, "בודקת על שווקים שכבר הוכרעו: האם 23% באמת קרו בערך ב-23% מהמקרים?"),
         h("li", null, "מחפשת כלל מסחר שמרוויח גם על תקופה שהוא לא ראה (מחוץ למדגם), אחרי עלויות."),
         h("li", null, "מחפשת סתירות בין שווקים קשורים, ובודקת בספר הפקודות אם אפשר באמת לבצע אותן."))),
-      sec("למה עדיין כתוב בכל מקום WAIT", h("p", null, "כי אף בדיקה עוד לא עברה את כל השערים: רווח מחוץ למדגם, תיקון לבדיקה של הרבה כללים, רווח גם עם עלויות כפולות, ואימות ביצוע בספר פקודות חי."),
+      sec("למה המערכת אומרת לא לקנות", h("p", null, "כי אף שיטה עוד לא הוכיחה שהיא מרוויחה: לא על נתוני העבר, לא אחרי עמלות, ולא במחיר שאפשר באמת לקנות בו."),
         h("p", null, "המצב כרגע: ", h("strong", null, wf ? ({ supported: "נמצא יתרון", oos_positive_needs_execution_check: "חיובי מחוץ למדגם, ממתין לאימות ביצוע", not_supported: "לא נמצא יתרון", insufficient_data: "אין מספיק נתוני עבר" }[wf.verdict] || wf.verdict) : "המחקר עוד לא רץ"), ". ",
           h("a", { href: "#/research" }, "לפרטי המחקר")))),
     card("איך לקרוא דף של שוק", "בכל שוק תמצא ארבעה \"מחירים\" שונים — חשוב לא לבלבל ביניהם",
@@ -1018,10 +1076,10 @@ PAGES.performance = async (view) => {
   const conf = E.filter((e) => e.status === "confirmed");
   const head = conf.length
     ? h("section", { class: "verdict go" }, h("h2", null, `${conf.length} אומתו קדימה`), h("p", null, conf.map((e) => `${e.label} (${ENGINE[e.engine]})`).join(" · ") + ". אימות קדימה אינו הבטחה לרווח בכסף אמיתי."))
-    : h("section", { class: "verdict" }, h("h2", null, "WAIT. שום דבר עוד לא אומת קדימה."),
+    : h("section", { class: "verdict" }, h("h2", null, "עוד אין שיטה שהוכיחה את עצמה."),
         h("p", null, `${E.filter((e) => e.status === "candidate").length} השערות מהעבר · ${E.filter((e) => e.status === "validating").length} בבדיקה קדימה · ${E.filter((e) => e.status === "failed").length} נכשלו · ${E.filter((e) => e.status === "insufficient").length} בלי מספיק נתונים.`));
   const legend = h("details", { class: "more legend" }, h("summary", null, "מה כל מצב אומר"),
-    h("ul", { class: "clean" }, Object.entries(STATE).map(([k, x]) => h("li", null, stateBadge(k), " ", h("span", { class: "faint" }, x.en + " — "), x.d))));
+    h("ul", { class: "clean" }, Object.entries(STATE).map(([k, x]) => h("li", null, stateBadge(k), " ", x.d))));
   const metric = (k, v) => h("div", null, h("div", { class: "k" }, k), h("div", { class: "v" }, v));
   const KINDNAME = { forward: "קדימה, בכסף מדומה", historical: "על נתוני העבר", measured: "נמדד אחרי שהגיע" };
   const cardOf = (e) => h("section", { class: "card entry" },
@@ -1045,13 +1103,13 @@ PAGES.performance = async (view) => {
     return h("p", { class: "ctx" }, `להשוואה: ${c.bench} בהחזקה פסיבית `, ltr(`${b.from} … ${b.to}`), ": תשואה ", ltr(pct(b.total_return, 0)), ", שנתית ", ltr(pct(b.cagr, 1)), ", תנודתיות ", ltr(pct(b.volatility, 0)), ", ירידה מרבית ", ltr(pct(b.max_drawdown, 0)), ".",
       c.assumed_cost != null ? ` עמלה מונחת: ${pct(c.assumed_cost, 1)} הלוך-חזור (הנחת מודל).` : ""); };
   const section = (k) => { const es = E.filter((e) => e.engine === k).sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || (b.n || 0) - (a.n || 0));
-    if (!es.length) return card(ENGINE[k], null, empty(k === "polymarket" ? "המחקר עוד לא רץ." : "INSUFFICIENT DATA: עוד אין תוצאות מהשרת."));
+    if (!es.length) return card(ENGINE[k], null, empty(k === "polymarket" ? "המחקר עוד לא רץ." : "עוד אין תוצאות מהשרת."));
     const live = es.filter((e) => !["failed", "insufficient"].includes(e.status));
     const fold = (st, title) => { const xs = es.filter((e) => e.status === st);
       return xs.length ? h("details", { class: "more" }, h("summary", null, `${title[0]} (${xs.length}) · ${title[1]}`), h("div", { class: "stack" }, xs.map(cardOf))) : null; };
     return h("section", { class: "engine" }, h("h2", { class: "section-title" }, ENGINE[k], " ", h("span", { class: "faint" }, `${es.length} נבדקו`)), ctx(k),
       live.length ? h("div", { class: "stack" }, live.map(cardOf)) : h("p", { class: "faint" }, "אין כאן אף השערה פעילה: כל מה שנבדק נכשל או שאין עליו מספיק נתונים."),
-      fold("failed", ["נכשלו", "FAILED"]), fold("insufficient", ["אין מספיק נתונים", "INSUFFICIENT DATA"])); };
+      fold("failed", ["נכשלו", "לחץ לפרטים"]), fold("insufficient", ["אין עדיין מספיק נתונים", "לחץ לפרטים"])); };
   view.replaceChildren(h("div", { class: "stack" }, head, legend, ...Object.keys(ENGINE).map(section),
     h("p", { class: "faint" }, "אל תשווה אחוזי הצלחה בין תחומים: במניות זה מול SPY, בקריפטו מול ביטקוין, ב-Polymarket מול מחיר השוק, ובטיפים ל-5 ימים. השווה את המצב, את הגבול התחתון ואת מה שחסר.")));
 };
@@ -1202,9 +1260,13 @@ PAGES.portfolio = (view) => view.replaceChildren(card("תיק נייר", "עוד
 PAGES.alerts = (view) => view.replaceChildren(card("התראות", "עוד לא פעיל",
   h("p", { class: "sub" }, "מתוכנן: תזוזה חריגה בשוק ממעקב, הזדמנות מבנית בת-ביצוע, ותקלה בסריקה. ערוץ: טלגרם."),
   h("p", { class: "faint" }, "אין התראות מזויפות — המסך הזה יתמלא רק כשיהיה מנגנון אמיתי מאחוריו.")));
-PAGES.more = (view) => view.replaceChildren(h("div", { class: "stack" },
-  ["agents", "evidence", "check", "lab", "tips", "etf", "pmoverview", "markets", "research", "system"].map((id) => { const r = ROUTES.find((x) => x.id === id);
-    return h("a", { class: "reason", href: r.path }, h("div", { class: "v" }, r.label), h("div", { class: "d" }, r.lead)); })));
+PAGES.more = (view) => {
+  const G = [["מניות", ["stocks", "lab", "tips", "evidence", "etf"]], ["קריפטו", ["crypto"]],
+    ["Polymarket", ["pm", "markets", "research"]], ["המערכת", ["agents", "system"]]];
+  view.replaceChildren(h("div", { class: "stack" }, G.map(([t, ids]) => h("section", null, h("h2", { class: "section-title" }, t),
+    h("div", { class: "stack" }, ids.map((id) => { const r = ROUTES.find((x) => x.id === id);
+      return h("a", { class: "reason", href: r.path }, h("div", { class: "v" }, r.label), h("div", { class: "d" }, r.lead)); }))))));
+};
 
 // ---- System Health ----
 const JOBS = { collect: "איסוף נזילים (15 דק׳)", collect_full: "סריקה מלאה", orderbooks: "ספרי פקודות", sync_closed: "סנכרון שווקים שנסגרו",

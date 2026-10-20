@@ -284,3 +284,21 @@ CREATE TABLE IF NOT EXISTS alerts_state (
     resolved_at timestamptz,
     text        text
 );
+
+-- Things the owner asked to follow (pmintel/follows.py): a Polymarket event, a stock or a coin
+CREATE TABLE IF NOT EXISTS follows (
+    id          bigserial PRIMARY KEY,
+    kind        text NOT NULL,            -- polymarket | stock | crypto
+    ref         text NOT NULL,            -- event slug[/market slug] or symbol
+    label       text NOT NULL,
+    url         text,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    active      boolean NOT NULL DEFAULT true,
+    first       jsonb NOT NULL,           -- prices when following started
+    baseline    jsonb NOT NULL,           -- prices at the last alert (moves are measured from here)
+    state       jsonb NOT NULL,           -- latest prices
+    checked_at  timestamptz,
+    alerted_at  timestamptz,
+    last_error  text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS follows_ref_uq ON follows (kind, ref) WHERE active;
