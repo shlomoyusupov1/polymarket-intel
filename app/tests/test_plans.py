@@ -46,7 +46,7 @@ def test_opportunities_and_plan_never_invent_targets(monkeypatch):
         conn.execute(f"DELETE FROM {t}")
     conn.execute("""INSERT INTO lab_signals (strategy, params, hold, symbol, signal_day, recorded_at, sha256, cost_rt, status,
                                              last_price, last_day, atr_pct)
-                    VALUES ('rsi2_pullback', '{}', 5, 'AMD', '2026-10-19', now(), 'x', 0.002, 'pending', 150, '2026-10-19', 0.03)""")
+                    VALUES ('rsi2_pullback', '{}', 5, 'AMD', current_date, now(), 'x', 0.002, 'pending', 150, current_date, 0.03)""")
     conn.close()
     monkeypatch.setattr(config, "DATABASE_URL", DB)
     monkeypatch.setattr(db.config, "DATABASE_URL", DB)
@@ -65,3 +65,7 @@ def test_opportunities_and_plan_never_invent_targets(monkeypatch):
         size = tc.get("/api/size", params={"price": 100, "stop": 95}).json()
         assert abs(size["units"] - 0.5) < 1e-9                       # $2.50 risk / $5 per share
         assert tc.get("/api/plan/signal/999999").status_code == 404
+        pf = tc.get("/api/portfolio").json()
+        assert pf["value"] == 500 and pf["history"][0]["decision"] == "ממתין לכניסה" and pf["history"][0]["sealed_before_entry"]
+        assert tc.get("/api/portfolio", params={"scope": "proven"}).json()["history"][0]["decision"] == "ממתין לכניסה"
+        assert tc.get("/api/portfolio", params={"scope": "x"}).status_code == 400
