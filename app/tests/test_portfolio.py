@@ -38,3 +38,46 @@ def test_scope_filter_and_history_reasons():
     assert h[2]["decision"] == "לא בתיק" and h[3]["decision"] == "ממתין לכניסה"
     assert abs(h[1]["ret_after_cost"] - 0.098) < 1e-12
     assert PF.replay([], 100.0, 50.0, 2)["max_drawdown"] is None
+
+
+def test_same_day_exit_cannot_fund_earlier_entry():
+    # AMD exits at 16:00 New York; MSFT wants to open at 09:30 that day.
+    old = sig(10, "AMD", "2026-01-01", "2026-01-02", "2026-01-05", 0.10)
+    new = sig(11, "MSFT", "2026-01-04", "2026-01-05", None, None, status="open", last=102)
+    result = PF.replay([old, new], 100.0, 80.0, 1)
+    assert result["decisions"][10][0] == "taken"
+    assert result["decisions"][11][0] == "skipped"
+    assert result["closed"] == 1
+    assert not result["positions"]
+
+
+def test_warning_and_late_signal_never_become_long_position():
+    warning = sig(1, "AMD", "2026-01-01", "2026-01-02", None, None,
+                  status="open", strategy="candle_shooting_star", last=105.0)
+    late = sig(2, "MSFT", "2026-01-02", "2026-01-03", None, None, status="open")
+    late["sealed_ok"] = False
+    result = PF.replay([warning, late], 100.0, 60.0, 2)
+    assert not result["positions"]
+    assert result["cash"] == 100.0
+    assert all(result["decisions"][i][0] == "skipped" for i in (1, 2))
+
+
+def test_actual_drawdown_unknown_without_intratrade_marks():
+    # A portfolio with only final entry/exit marks cannot report true peak-to-trough drawdown.
+    row = sig(1, "AMD", "2026-01-01", "2026-01-02", "2026-01-09", 0.2)
+    result = PF.replay([row], 100.0, 50.0, 1)
+    assert result["max_drawdown"] is None
+    assert result["drawdown_note"]
+    assert "closed_trade_drawdown" in result
+
+
+def test_eligibility_is_pinned_to_the_signal_not_later_strategy_result():
+    old = sig(1, "AMD", "2026-01-01", "2026-01-02", "2026-01-09", 0.2)
+    old["lab_verdict"] = "candidate_for_paper"
+    new = sig(2, "MSFT", "2026-01-11", "2026-01-12", None, None, status="open")
+    new["lab_verdict"] = "forward_confirmed"
+    result = PF.replay([old, new], 100.0, 10.0, 2,
+                       eligible_at_signal=lambda r: r.get("lab_verdict") == "forward_confirmed")
+    assert result["closed"] == 0
+    assert result["decisions"][1][0] == "skipped"
+    assert [p["symbol"] for p in result["positions"]] == ["MSFT"]
