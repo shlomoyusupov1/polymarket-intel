@@ -375,3 +375,4 @@ ul.plain li { margin: 6px 0; line-height: 1.6; }
 .prof.on { border-color: var(--accent); background: var(--info-bg); }
 .rules { white-space: pre-wrap; font-size: 14px; color: var(--muted); }
 .reasons.two { grid-template-columns: repeat(2, minmax(0, 1fr)); } .reasons.two .v { font-size: 20px; }
+.alert-text { white-space: pre-wrap; font: inherit; margin: 8px 0; font-size: 14px; }

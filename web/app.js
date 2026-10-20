@@ -110,6 +110,8 @@ const ROUTES = [
   { id: "settings", path: "#/settings", label: "התקציב שלי", short: "תקציב", icon: "wallet",
     lead: "כמה כסף יש לך לניסוי, כמה מוכן להפסיד בעסקה, ומה העמלה של הברוקר. כל החישובים במערכת יוצאים מכאן." },
   { id: "plan", path: "#/plan", label: "כרטיס עסקה", lead: "" },
+  { id: "live", path: "#/live", label: "שוק חי", short: "חי", icon: "pulse",
+    lead: "מחירים חיים של מה שאתה עוקב אחריו, הפוזיציות המדומות ומדדי הייחוס — עם זמן המקור והעיכוב של כל מחיר, וההתראות האחרונות." },
   { id: "portfolio", path: "#/portfolio", label: "התיק המדומה", short: "תיק", icon: "wallet",
     lead: "תיק בכסף מדומה שנבנה רק מאיתותים שנרשמו מראש, לפני שהמחיר זז — לפי התקציב והסיכון שלך. לא סימולציה בדיעבד." },
   { id: "history", path: "#/history", label: "היסטוריית החלטות", icon: "list",
@@ -942,6 +944,56 @@ PAGES.settings = async (view) => {
     h("button", { class: "btn primary", type: "submit" }, "שמור"), msg));
 };
 
+// ---- שוק חי (Live monitor) ----
+let liveTimer = null;
+const secs = (v) => v == null ? "—" : v < 1 ? `${(v * 1000).toFixed(0)} מ״ש` : v < 120 ? `${v.toFixed(1)} שנ׳` : v < 7200 ? `${Math.round(v / 60)} דק׳` : `${Math.round(v / 3600)} שע׳`;
+const FEED_HE = { polymarket: "Polymarket (WebSocket)", coinbase: "קריפטו — Coinbase (WebSocket)", yahoo: "מניות — Yahoo (ציטוט כל דקה)" };
+const LVL = { market: ["wait", "שוק"], risk: ["bad", "סיכון"], strategy: ["ok", "אסטרטגיה"], data: ["", "נתונים"] };
+PAGES.live = async (view) => {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  const body = h("div", { class: "stack" }, skel(4));
+  view.replaceChildren(body);
+  const draw = async () => {
+    const [st, al] = await Promise.all([api("/api/live/status"), api("/api/live/alerts?limit=30").catch(() => [])]);
+    if (current !== "live") return;
+    if (!st.running) { body.replaceChildren(card("המעקב החי לא רץ", "השירות live עוד לא הופעל בשרת, או שנפל.",
+      h("pre", { class: "code", dir: "ltr" }, "sudo docker compose up -d live"))); return; }
+    const L = st.latency || {};
+    const feeds = Object.entries(st.feeds).map(([k, f]) => h("div", { class: "reason" },
+      h("div", { class: "k" }, h("span", { class: "dot " + (f.connected ? "ok" : "bad") }), " ", FEED_HE[k] || k),
+      h("div", { class: "v" }, f.connected ? "מחובר" : "מנותק"),
+      h("div", { class: "d" }, `${f.subscribed} נכסים · הודעה אחרונה ${f.last_msg_at ? ago(f.last_msg_at) : "אף פעם"}`),
+      h("div", { class: "d" }, `עיכוב מהמקור: ממוצע ${secs(f.lag_mean)} · P95 ${secs(f.lag_p95)}`),
+      f.note ? h("div", { class: "d" }, f.note) : null, f.error ? h("div", { class: "d down" }, f.error) : null));
+    const prices = h("div", { class: "scroll-x" }, h("table", { class: "t" },
+      h("thead", null, h("tr", null, ["נכס", "מחיר", "זמן במקור", "גיל", "מצב", "למה במעקב"].map((x) => h("th", null, x)))),
+      h("tbody", null, st.prices.map((r) => h("tr", null, h("td", { dir: "auto" }, r.name),
+        h("td", null, ltr(r.cls === "polymarket" ? Math.round(r.price * 100) + "%" : usd2(r.price))),
+        h("td", null, r.src_ts ? ltr(new Date(r.src_ts).toLocaleTimeString("he-IL")) : "—"),
+        h("td", null, secs(r.age_s)),
+        h("td", null, h("span", { class: "badge " + (r.fresh ? "ok" : "wait") }, r.fresh ? "חי" : "לא עדכני")),
+        h("td", { class: "faint" }, (r.roles || []).map((x) => ({ follow: "אתה עוקב", position: "פוזיציה מדומה", benchmark: "מדד ייחוס" }[x] || x)).join(", ")))))));
+    const alerts = al.length ? h("ul", { class: "hist" }, al.map((a) => { const [c, l] = LVL[a.level] || ["", a.level];
+      return h("li", { class: "card" }, h("div", { class: "row-between" }, h("span", { class: "badge " + c }, l), h("span", { class: "faint" }, when(a.detected_at))),
+        h("pre", { class: "alert-text", dir: "auto" }, a.text),
+        h("div", { class: "faint" }, a.status === "sent" ? `נשלח לטלגרם · ${secs((new Date(a.sent_at) - new Date(a.src_ts)) / 1000)} מזמן הנתון` :
+          a.status === "suppressed" ? "לא נשלח: הגעת לתקרת ההתראות היומית" : a.status === "failed" ? "השליחה לטלגרם נכשלה" : "ממתין לשליחה")); }))
+      : empty("עוד לא היו התראות. זה טוב: לא זוהה אירוע חריג.");
+    body.replaceChildren(
+      h("div", { class: "reasons" }, feeds),
+      card("כמה מהר", "מזמן הנתון אצל המקור, דרך הזיהוי, ועד ההודעה בטלגרם (7 ימים אחרונים)",
+        h("ul", { class: "clean plain" },
+          h("li", null, `זיהוי: ממוצע ${secs(L.detect?.mean)}, P95 ${secs(L.detect?.p95)} (${L.detect?.n || 0} התראות)`),
+          h("li", null, `עד הטלגרם: ממוצע ${secs(L.alerts?.mean)}, P95 ${secs(L.alerts?.p95)} · נכשלו ${L.failed || 0} · ממתינות ${L.pending || 0}`),
+          h("li", { class: "faint" }, "יעד: עד 10 שניות בקריפטו וב-Polymarket. במניות עד כ-2 דקות, כי הציטוט מגיע פעם בדקה ולא מפיד מורשה."))),
+      card("מחירים", "\"חי\" רק כשהמחיר טרי. מחיר ישן מסומן \"לא עדכני\" ולא משמש להחלטה.", prices),
+      card("התראות אחרונות", "שוק = אירוע בשוק · סיכון = נוגע לפוזיציה מדומה · נתונים = זרם תקוע או מנותק", alerts),
+      h("p", { class: "faint" }, "התראה על ירידה היא עובדה בשוק, לא המלצה למכור. מתעדכן כל 10 שניות."));
+  };
+  try { await draw(); } catch (e) { body.replaceChildren(fail(e)); }
+  liveTimer = setInterval(() => { if (current !== "live") { clearInterval(liveTimer); liveTimer = null; return; } draw().catch(() => {}); }, 10000);
+};
+
 // ---- המעקב שלי (Follow) ----
 async function apiSend(method, path, body) {
   const r = await fetch(path, { method, headers: { "Content-Type": "application/json", Accept: "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -1104,7 +1156,7 @@ PAGES.home = async (view) => {
       h("p", { class: "sys " + (bad.length ? "down" : "up") }, h("span", { class: "dot " + (bad.length ? "bad" : "ok"), "aria-hidden": "true" }),
         bad.length ? ` ${bad.length} חלקים לא עובדים: ${bad.map((a) => a.name).join(", ")}` : " הכל עובד."),
       work.length ? h("p", { class: "faint" }, "עכשיו: " + work.map((a) => `${a.name} (${a.role})`).join(", ")) : null,
-      h("a", { href: "#/agents" }, "מה כל חלק עושה")); };
+      h("a", { href: "#/live" }, "שוק חי"), " · ", h("a", { href: "#/agents" }, "מה כל חלק עושה")); };
   const sysBox = h("div", null, sysLine(ag));
   view.replaceChildren(h("div", { class: "stack" },
     h("section", { class: "verdict " + VERDICT[0] }, h("div", { class: "when" }, today), h("h2", null, VERDICT[1]), h("p", null, VERDICT[2]),
@@ -1423,7 +1475,8 @@ PAGES.portfolio = async (view) => {
         h("thead", null, h("tr", null, ["נכס", "שיטה", "כניסה", "מחיר כניסה", "סכום", "יחידות", "מחיר נוכחי", "רווח/הפסד", "יציאה"].map((x) => h("th", null, x)))),
         h("tbody", null, d.positions.map((p) => h("tr", null, h("td", null, ltr(p.symbol.replace("-USD", ""))), h("td", null, p.label),
           h("td", null, ltr(String(p.entry_day))), h("td", null, ltr(usd2(p.entry_price))), h("td", null, ltr(usd2(p.size))),
-          h("td", null, ltr(p.units.toFixed(4))), h("td", null, ltr(usd2(p.price)), p.price_day ? h("div", { class: "faint" }, ltr(String(p.price_day))) : null),
+          h("td", null, ltr(p.units.toFixed(4))), h("td", null, ltr(usd2(p.price)),
+            h("div", { class: p.price_live ? "up" : "faint" }, p.price_live ? "חי · " + when(p.price_day) : "לא עדכני · סגירה " + (p.price_day ? String(p.price_day).slice(0, 10) : "—"))),
           h("td", null, pmoney(p.pnl), " ", pct1(p.pnl_pct)), h("td", null, `לפי זמן: אחרי ${p.hold} ימים · בלי יעד ובלי עצירה`))))))
         : empty("אין עסקאות פתוחות.")),
     h("p", null, h("a", { href: "#/history" }, "כל ההחלטות: מה נכנס, מה דולג ולמה")),
@@ -1451,7 +1504,7 @@ PAGES.alerts = (view) => view.replaceChildren(card("התראות", "עוד לא 
   h("p", { class: "sub" }, "מתוכנן: תזוזה חריגה בשוק ממעקב, הזדמנות מבנית בת-ביצוע, ותקלה בסריקה. ערוץ: טלגרם."),
   h("p", { class: "faint" }, "אין התראות מזויפות — המסך הזה יתמלא רק כשיהיה מנגנון אמיתי מאחוריו.")));
 PAGES.more = (view) => {
-  const G = [["שלי", ["portfolio", "history", "settings", "check"]], ["מניות", ["stocks", "lab", "tips", "evidence", "etf"]], ["קריפטו", ["crypto"]],
+  const G = [["שלי", ["live", "portfolio", "history", "settings", "check"]], ["מניות", ["stocks", "lab", "tips", "evidence", "etf"]], ["קריפטו", ["crypto"]],
     ["Polymarket", ["pm", "markets", "research"]], ["המערכת", ["agents", "system"]]];
   view.replaceChildren(h("div", { class: "stack" }, G.map(([t, ids]) => h("section", null, h("h2", { class: "section-title" }, t),
     h("div", { class: "stack" }, ids.map((id) => { const r = ROUTES.find((x) => x.id === id);

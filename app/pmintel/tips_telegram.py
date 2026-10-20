@@ -90,6 +90,30 @@ async def alert_loop(cl, conn):
         await asyncio.sleep(900)
 
 
+async def live_alert_loop(cl, conn):
+    """Every 3 s: send the live monitor's pending alerts (pmintel/live.py) to Saved Messages."""
+    from . import alerts
+    if not alerts.enabled():
+        return
+    site = os.environ.get("SITE_URL")
+    while True:
+        try:
+            rows = await asyncio.to_thread(lambda: conn.execute(
+                "SELECT id, text FROM live_alerts WHERE status = 'pending' ORDER BY id LIMIT 10").fetchall())
+            for rid, text in rows:
+                try:
+                    await cl.send_message("me", text + (f"\n{site}/#/live" if site else ""))
+                    status = "sent"
+                except Exception:  # noqa: BLE001
+                    log.exception("live alert %s not sent", rid)
+                    status = "failed"
+                await asyncio.to_thread(lambda: conn.execute(
+                    "UPDATE live_alerts SET status = %s, sent_at = now() WHERE id = %s", (status, rid)))
+        except Exception:
+            log.exception("live alert loop failed")
+        await asyncio.sleep(3)
+
+
 async def run(args):
     conn = db.connect()
     db.init_schema(conn)
@@ -173,6 +197,7 @@ async def run(args):
 
     asyncio.create_task(outcome_loop(conn))
     asyncio.create_task(alert_loop(cl, conn))
+    asyncio.create_task(live_alert_loop(cl, conn))
     await cl.run_until_disconnected()
 
 

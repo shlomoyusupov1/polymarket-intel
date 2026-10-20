@@ -42,6 +42,11 @@ services:
     <<: *app
     command: ["python", "-m", "pmintel.lab_paper"]
 
+  # Live market monitor: Polymarket + Coinbase WebSockets, stock quotes each minute, alerts within seconds
+  live:
+    <<: *app
+    command: ["python", "-m", "pmintel.live"]
+
   # Tip tracker: read-only Telegram listener (owner's account) + outcome updates
   tips:
     <<: *app
