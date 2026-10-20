@@ -11,8 +11,9 @@ S = {**P.DEFAULTS, "budget": 1000.0, "profile": "moderate"}
 
 def test_size_by_cap_without_stop_and_says_loss_is_not_capped():
     r = P.size(S, 50.0, typical_loss=-0.06)
-    assert r["sized_by"] == "תקרה" and abs(r["position_usd"] - 330) < 1e-9 and abs(r["units"] - 6.6) < 1e-9
-    assert abs(r["bad_case_loss"] - 330 * 0.06) < 1e-9 and r["planned_loss"] is None
+    assert r["sized_by"] == "תקרת הפסד מלא" and abs(r["position_usd"] - 10) < 1e-9 and abs(r["units"] - 0.2) < 1e-9
+    assert abs(r["bad_case_loss"] - 10 * 0.06) < 1e-9 and r["planned_loss"] is None
+    assert r["max_loss_without_stop"] == 10
     assert any("לא הוגדרה עצירת הפסד" in n for n in r["notes"]) and any("עמלת הברוקר" in n for n in r["notes"])
 
 
@@ -60,12 +61,20 @@ def test_opportunities_and_plan_never_invent_targets(monkeypatch):
         p = tc.get(f"/api/plan/signal/{sig['id']}").json()
         titles = [x["title"] for x in p["sections"]]
         assert titles[:4] == ["מה אנחנו בוחנים", "מתי להיכנס", "כמה כסף", "מתי לצאת"]
-        assert abs(p["sizing"]["position_usd"] - 125) < 1e-9          # 25% of $500
+        assert abs(p["sizing"]["position_usd"] - 2.5) < 1e-9  # no stop: 0.5% full-loss limit
         assert any("להמתין" in l for x in p["sections"] for l in x["lines"])
         size = tc.get("/api/size", params={"price": 100, "stop": 95}).json()
         assert abs(size["units"] - 0.5) < 1e-9                       # $2.50 risk / $5 per share
         assert tc.get("/api/plan/signal/999999").status_code == 404
         pf = tc.get("/api/portfolio").json()
         assert pf["value"] == 500 and pf["history"][0]["decision"] == "ממתין לכניסה" and pf["history"][0]["sealed_before_entry"]
-        assert tc.get("/api/portfolio", params={"scope": "proven"}).json()["history"][0]["decision"] == "ממתין לכניסה"
+        assert tc.get("/api/portfolio", params={"scope": "proven"}).json()["history"][0]["decision"] == "דילוג"
         assert tc.get("/api/portfolio", params={"scope": "x"}).status_code == 400
+
+def test_no_stop_fees_can_invalidate_full_loss_budget():
+    s = {**S, "budget": 100.0, "profile": "moderate", "fee_min": 1.0}
+    result = P.size(s, 50.0)
+    assert result["position_usd"] == 1.0
+    assert result["max_loss_without_stop"] == 3.0
+    assert not result["ok"]
+    assert any("חורגים ממגבלת הסיכון" in note for note in result["notes"])
