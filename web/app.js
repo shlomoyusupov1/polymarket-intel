@@ -1454,23 +1454,25 @@ PAGES.portfolio = async (view) => {
   const d = await api("/api/portfolio?scope=" + pfScope);
   if (current !== "portfolio") return;
   const L = d.limits;
-  const seg = h("div", { class: "seg", role: "group", "aria-label": "אילו שיטות" }, [["all", "כל השיטות (ללמידה)"], ["proven", "רק שיטות שעברו"]].map(([v, l]) =>
+  const seg = h("div", { class: "seg", role: "group", "aria-label": "אילו שיטות" }, [["all", "כל האיתותים (ללמידה)"], ["validating", "בבדיקה קדימה"], ["confirmed", "רק שאומתו"]].map(([v, l]) =>
     h("button", { type: "button", "aria-pressed": String(pfScope === v), onclick: () => { pfScope = v; route(); } }, l)));
   const tile = (k, v, note) => h("div", { class: "reason" }, h("div", { class: "k" }, k), h("div", { class: "v" }, v), note ? h("div", { class: "d" }, note) : null);
   const bench = d.closed ? d.bench_same_trades : null;
   view.replaceChildren(h("div", { class: "stack" },
-    h("section", { class: "verdict" }, h("h2", null, pfScope === "all" ? "תיק תרגול: כל האיתותים" : "תיק: רק שיטות שעברו בדיקה"),
-      h("p", null, pfScope === "all" ? "כולל שיטות שנכשלו בבדיקה. זה תרגול שמראה איך היה נראה לפעול לפי כל איתות — לא אסטרטגיה מומלצת."
-        : (d.proven_strategies.length ? `שיטות בתיק: ${d.proven_strategies.length}.` : "אף שיטה עוד לא עברה בדיקה, לכן התיק ריק. זו התוצאה הנכונה כרגע."))),
+    h("section", { class: "verdict" }, h("h2", null, { all: "תיק תרגול: כל האיתותים", validating: "תיק הבדיקה קדימה", confirmed: "תיק השיטות שאומתו" }[pfScope]),
+      h("p", null, { all: "כולל שיטות שנכשלו בבדיקה. זה תרגול שמראה איך היה נראה לפעול לפי כל איתות — לא אסטרטגיה מומלצת.",
+        validating: `רק איתותים של שיטות שעברו את הבדיקה על העבר ברגע האיתות — זה המבחן קדימה עצמו. ${d.state_counts.validating + d.state_counts.confirmed} איתותים כאלה.`,
+        confirmed: d.state_counts.confirmed ? `רק איתותים של שיטות שכבר אומתו קדימה ברגע האיתות. ${d.state_counts.confirmed} איתותים.`
+          : "אף איתות לא נוצר משיטה שכבר אומתה קדימה, לכן התיק ריק. זו התוצאה הנכונה כרגע." }[pfScope])),
     seg, budgetBar({ limits: L }),
     h("div", { class: "reasons two" },
       tile("שווי התיק", ltr("$" + d.value.toFixed(2)), h("span", null, "מתוך $", L.budget.toFixed(0), " · ", pct1(d["return"]))),
       tile("מזומן פנוי", ltr("$" + d.cash.toFixed(2))),
       tile("רווח/הפסד ממומש", pmoney(d.realized), `${d.closed} עסקאות נסגרו, ${d.wins} ברווח`),
       tile("רווח/הפסד לא ממומש", pmoney(d.unrealized), `${d.positions.length} פתוחות`),
-      tile("ירידה מרבית", d.max_drawdown == null ? "—" : pct1(d.max_drawdown), "על עסקאות שנסגרו"),
+      tile("ירידה מרבית", d.max_drawdown == null ? "לא נמדדה" : pct1(d.max_drawdown), d.drawdown_note || "לפי שווי מתועד של כלל הפוזיציות"),
       tile("מול המדד באותן עסקאות", bench == null ? "—" : pmoney(d.realized - bench), bench == null ? "עוד אין עסקאות סגורות" : "רווח התיק פחות מה שהמדד היה נותן על אותו סכום")),
-    card("עסקאות פתוחות", `עד ${L.max_open} בבת אחת, עד $${L.max_position_usd.toFixed(2)} לכל אחת (לפי הפרופיל שלך)`,
+    card("עסקאות פתוחות", `עד ${L.max_open} בבת אחת, עד $${d.position_cap_usd.toFixed(2)} לכל אחת (תקרת החשיפה בפרופיל). בלי עצירה — כל פוזיציה יכולה להפסיד את כל הסכום.`,
       d.positions.length ? h("div", { class: "scroll-x" }, h("table", { class: "t" },
         h("thead", null, h("tr", null, ["נכס", "שיטה", "כניסה", "מחיר כניסה", "סכום", "יחידות", "מחיר נוכחי", "רווח/הפסד", "יציאה"].map((x) => h("th", null, x)))),
         h("tbody", null, d.positions.map((p) => h("tr", null, h("td", null, ltr(p.symbol.replace("-USD", ""))), h("td", null, p.label),
@@ -1480,23 +1482,23 @@ PAGES.portfolio = async (view) => {
           h("td", null, pmoney(p.pnl), " ", pct1(p.pnl_pct)), h("td", null, `לפי זמן: אחרי ${p.hold} ימים · בלי יעד ובלי עצירה`))))))
         : empty("אין עסקאות פתוחות.")),
     h("p", null, h("a", { href: "#/history" }, "כל ההחלטות: מה נכנס, מה דולג ולמה")),
-    h("p", { class: "faint" }, "כניסה במחיר הפתיחה שנרשם בפועל, יציאה לפי זמן, ועלות מסחר משוערת בכל עסקה. עסקה פתוחה מוערכת לפי המחיר האחרון שנבדק.")));
+    h("p", { class: "faint" }, d.simulation_note + " " + d.risk_note + " עסקאות פתוחות מוערכות לפי המחיר האחרון שנקלט; אם הוא ישן, הוא מסומן ככזה.")));
 };
 PAGES.history = async (view) => {
   const d = await api("/api/portfolio?scope=" + pfScope);
   if (current !== "history") return;
   const DEC = { "נכנס לתיק": "ok", "דילוג": "wait", "לא בתיק": "", "ממתין לכניסה": "info" };
   view.replaceChildren(h("div", { class: "stack" },
-    h("p", null, `לפי ${pfScope === "all" ? "תיק התרגול (כל השיטות)" : "התיק של שיטות שעברו"}. ${d.history.length} איתותים.`),
+    h("p", null, `${{ all: "כל האיתותים", validating: "תיק הבדיקה קדימה", confirmed: "תיק השיטות שאומתו" }[pfScope]} · סימולציה לפי הגדרות התקציב של היום — לא יומן החלטות נעול. ${d.history.length} איתותים.`),
     d.history.length ? h("ul", { class: "hist" }, d.history.map((x) => h("li", { class: "card" },
       h("div", { class: "row-between" }, h("strong", null, ltr(x.symbol.replace("-USD", "")), " · ", x.strategy), h("span", { class: "badge " + (DEC[x.decision] || "") }, x.decision)),
       h("div", { class: "faint" }, "זוהה ביום המסחר ", ltr(String(x.signal_day)), " · נרשם ", when(x.recorded_at),
-        x.sealed_before_entry ? " · נחתם לפני הכניסה ✓" : " · נרשם מאוחר — לא נחשב"),
+        x.sealed_before_entry ? " · נרשם לפני זמן הכניסה לפי בסיס הנתונים (אין חותמת זמן חיצונית)" : " · נרשם מאוחר — אינו נחשב"),
       h("div", null, x.why),
       x.entry_day ? h("div", null, "כניסה מדומה: ", ltr(String(x.entry_day)), " ב-", ltr(usd2(x.entry_price)),
         x.exit_day ? [" · יציאה: ", ltr(String(x.exit_day)), ` (לפי זמן, אחרי ${x.hold} ימים)`] : " · עדיין פתוחה") : null,
       x.ret_after_cost != null ? h("div", null, "תוצאה אחרי עלויות: ", pct1(x.ret_after_cost), " · מול מדד הייחוס: ", pct1(x.excess)) : null,
-      h("div", { class: "faint" }, "מה היה ידוע אז: מצב השיטה בבדיקה על העבר — ", x.lab_verdict === "candidate_for_paper" ? "מועמדת" : x.lab_verdict ? "לא עברה" : "לא ידוע",
+      h("div", { class: "faint" }, "מצב השיטה ברגע האיתות (נחתם איתו): ", { confirmed: "אומתה קדימה", validating: "עברה על העבר, בבדיקה קדימה", not_eligible: "לא עברה על העבר" }[x.strategy_state] || "לא נשמר (איתות ישן)",
         ". חתימה: ", ltr(String(x.sha256).slice(0, 12)))))) : empty("עוד לא נרשמו איתותים. הם נוצרים כל יום אחרי סגירת המסחר."),
     h("p", { class: "faint" }, "כל איתות נחתם (SHA-256) ברגע הרישום, לפני שהמחיר של הכניסה ידוע. כך אי אפשר לשנות אחרי מעשה מה המערכת \"החליטה\".")));
 };

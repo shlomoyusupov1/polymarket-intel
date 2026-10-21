@@ -37,7 +37,7 @@ def test_entry_waits_one_full_day():
     b, btc = coin(2, 60), coin(3, 60)
     f = L.features(b, M)
     sidx = L._spy_index(btc)
-    x, entry, cost = L._excess(f, 10, 7, btc, sidx, lag=M.lag)
+    x, entry, cost, _raw = L._excess(f, 10, 7, btc, sidx, lag=M.lag)
     assert entry == b[12]["day"]
     want = (b[18]["c"] / b[12]["o"] - 1) - (btc[18]["c"] / btc[12]["o"] - 1) - M.fixed_cost
     assert abs(x - want) < 1e-12

@@ -144,6 +144,6 @@ def test_warning_patterns_score_the_lag_behind_the_benchmark():
     b, spy = walk(5, 40), walk(6, 40)
     f = L.features(b)
     sidx = L._spy_index(spy)
-    long_, _, cost = L._excess(f, 10, 5, spy, sidx)
-    warn, _, _ = L._excess(f, 10, 5, spy, sidx, sd=-1)
+    long_, _, cost, _ = L._excess(f, 10, 5, spy, sidx)
+    warn, _, _, _ = L._excess(f, 10, 5, spy, sidx, sd=-1)
     assert abs((long_ + cost) + (warn + cost)) < 1e-12  # mirror images before cost; both pay the cost
