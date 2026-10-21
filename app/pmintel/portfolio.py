@@ -36,8 +36,40 @@ def _event_at(day, strategy: str, is_entry: bool) -> datetime:
     return datetime.combine(d, clock, ZoneInfo("America/New_York")).astimezone(timezone.utc)
 
 
+def marked_curve(legs: list[dict], budget: float, marks: dict) -> list[dict]:
+    """Daily equity, marked to market: budget + realized P&L of trades closed by that day + the open
+    positions valued at that day's close (latest mark on or before the day; the entry price before any).
+    legs: taken positions {id, entry_day, exit_day|None, size, units, entry_price, pnl|None}."""
+    days = sorted({str(d) for leg in legs for d in (marks.get(leg["id"]) or {})}
+                  | {str(leg["entry_day"]) for leg in legs} | {str(leg["exit_day"]) for leg in legs if leg["exit_day"]})
+    out = []
+    for d in days:
+        eq = budget
+        for leg in legs:
+            ent, ex = str(leg["entry_day"]), (str(leg["exit_day"]) if leg["exit_day"] else None)
+            if ex and ex <= d:
+                eq += leg["pnl"]
+            elif ent <= d:
+                m = marks.get(leg["id"]) or {}
+                past = [k for k in m if str(k) <= d]
+                px = m[max(past)] if past else leg["entry_price"]
+                eq += leg["units"] * px - leg["size"]
+        out.append({"day": d, "equity": eq})
+    return out
+
+
+def drawdown(curve: list[dict]) -> float | None:
+    if not curve:
+        return None
+    peak, dd = curve[0]["equity"], 0.0
+    for c in curve:
+        peak = max(peak, c["equity"])
+        dd = min(dd, c["equity"] / peak - 1)
+    return dd
+
+
 def replay(rows: list[dict], budget: float, max_position: float, max_open: int,
-           allowed=None, eligible_at_signal=None) -> dict:
+           allowed=None, eligible_at_signal=None, marks: dict | None = None) -> dict:
     """rows: lab_signals as dicts (see api), any order. allowed(strategy)->bool filters strategies."""
     rows = sorted(rows, key=lambda r: (str(r["recorded_at"]), r["id"]))
     events, decisions = [], {}
@@ -45,7 +77,7 @@ def replay(rows: list[dict], budget: float, max_position: float, max_open: int,
         if allowed and not allowed(r["strategy"]):
             continue
         if eligible_at_signal and not eligible_at_signal(r):
-            decisions[r["id"]] = ("skipped", "השיטה לא אומתה קדימה בזמן האיתות")
+            decisions[r["id"]] = ("skipped", "השיטה לא הייתה במצב הנדרש ברגע האיתות")
             continue
         rid, strategy = r["id"], r["strategy"]
         base = strategy.split(":")[-1]
@@ -64,7 +96,7 @@ def replay(rows: list[dict], budget: float, max_position: float, max_open: int,
                 events.append((_event_at(r["exit_day"], strategy, False), 2, r))
     # Respect actual market sessions. A 16:00 exit cannot fund a 09:30 entry.
     events.sort(key=lambda e: (e[0], e[1], str(e[2]["recorded_at"])))
-    cash, open_, trades = budget, {}, []
+    cash, open_, trades, legs = budget, {}, [], {}
     realized = 0.0
     curve, peak, dd = [], budget, 0.0
     for at, kind, r in events:
@@ -85,6 +117,8 @@ def replay(rows: list[dict], budget: float, max_position: float, max_open: int,
             units = (size - fee) / r["entry_price"]
             cash -= size
             open_[rid] = {"row": r, "symbol": r["symbol"], "size": size, "units": units, "entry_fee": fee}
+            legs[rid] = {"id": rid, "entry_day": r["entry_day"], "exit_day": None, "size": size, "units": units,
+                         "entry_price": r["entry_price"], "pnl": None}
             decisions[rid] = ("taken", "נכנס לתיק המדומה")
         elif rid in open_:
             o = open_.pop(rid)
@@ -94,6 +128,7 @@ def replay(rows: list[dict], budget: float, max_position: float, max_open: int,
             pnl = proceeds - o["size"]
             cash += proceeds
             realized += pnl
+            legs[rid].update(exit_day=r["exit_day"], pnl=pnl)
             trades.append({"id": rid, "pnl": pnl, "pnl_pct": pnl / o["size"], "size": o["size"],
                            "bench": o["size"] * (r["spy_ret"] or 0), "exit_day": day})
             # Diagnostic only: closed-trade curve omits open-position losses.
@@ -117,9 +152,13 @@ def replay(rows: list[dict], budget: float, max_position: float, max_open: int,
     return {"budget": budget, "cash": cash, "value": cash + invested, "realized": realized, "unrealized": unrealized,
             "return": (cash + invested) / budget - 1, "closed": len(trades),
             "wins": sum(1 for t in trades if t["pnl"] > 0),
-            "max_drawdown": None,  # requires daily/intraday marked equity for ALL open positions
+            # true drawdown needs every open position marked daily (lab_marks); without marks: unknown
+            "max_drawdown": drawdown(marked_curve(list(legs.values()), budget, marks)) if marks is not None and legs else None,
+            "marked_curve": marked_curve(list(legs.values()), budget, marks) if marks is not None and legs else [],
             "closed_trade_drawdown": dd if trades else None,
-            "drawdown_note": "טרם ניתן למדוד ירידה מרבית אמיתית: חסרים סימוני שווי במהלך חיי הפוזיציות.",
+            "drawdown_note": ("לפי שווי יומי של כל הפוזיציות (מחיר סגירה בכל יום מסחר), לא רק עסקאות שנסגרו."
+                              if marks is not None and legs else
+                              "טרם ניתן למדוד ירידה מרבית אמיתית: חסרים סימוני שווי במהלך חיי הפוזיציות."),
             "bench_same_trades": bench, "positions": positions, "trades": trades, "curve": curve,
             "decisions": decisions,
             "exposure": _exposure(positions)}
@@ -146,7 +185,8 @@ def history(rows: list[dict], decisions: dict, labels: dict) -> list[dict]:
             what, why = "לא בתיק", "השיטה לא בתחום התיק שבחרת"
         out.append({"id": r["id"], "strategy": labels.get(r["strategy"], r["strategy"]), "symbol": r["symbol"],
                     "signal_day": r["signal_day"], "recorded_at": r["recorded_at"], "sha256": r["sha256"],
-                    "lab_verdict": r.get("lab_verdict"), "status": r["status"], "entry_day": r["entry_day"],
+                    "lab_verdict": r.get("lab_verdict"), "strategy_state": r.get("strategy_state"),
+                    "status": r["status"], "entry_day": r["entry_day"],
                     "entry_price": r["entry_price"], "exit_day": r["exit_day"], "hold": r["hold"],
                     "ret_after_cost": (r["ret"] - r["cost_rt"]) if r["ret"] is not None else None,
                     "excess": r["excess"], "decision": what, "why": why,

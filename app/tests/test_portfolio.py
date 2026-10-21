@@ -73,11 +73,25 @@ def test_actual_drawdown_unknown_without_intratrade_marks():
 
 def test_eligibility_is_pinned_to_the_signal_not_later_strategy_result():
     old = sig(1, "AMD", "2026-01-01", "2026-01-02", "2026-01-09", 0.2)
-    old["lab_verdict"] = "candidate_for_paper"
+    old["strategy_state"] = "not_eligible"
     new = sig(2, "MSFT", "2026-01-11", "2026-01-12", None, None, status="open")
-    new["lab_verdict"] = "forward_confirmed"
+    new["strategy_state"] = "confirmed"
     result = PF.replay([old, new], 100.0, 10.0, 2,
-                       eligible_at_signal=lambda r: r.get("lab_verdict") == "forward_confirmed")
+                       eligible_at_signal=lambda r: r.get("strategy_state") == "confirmed")
     assert result["closed"] == 0
     assert result["decisions"][1][0] == "skipped"
     assert [p["symbol"] for p in result["positions"]] == ["MSFT"]
+
+
+def test_marked_to_market_drawdown_sees_losses_inside_open_and_closed_trades():
+    # bought at 100, fell to 70 during the hold, recovered to close +5%: closed-trade drawdown would be 0
+    row = sig(1, "AMD", "2026-01-01", "2026-01-02", "2026-01-09", 0.05)
+    row["cost_rt"] = 0.0
+    marks = {1: {"2026-01-02": 100.0, "2026-01-05": 70.0, "2026-01-06": 90.0, "2026-01-09": 105.0}}
+    r = PF.replay([row], 100.0, 50.0, 1, marks=marks)
+    assert abs(r["max_drawdown"] - (85.0 / 100.0 - 1)) < 1e-9          # equity 100 -> 85 at the low
+    assert r["marked_curve"][-1]["equity"] == 102.5 and "יומי" in r["drawdown_note"]
+    still_open = sig(2, "MSFT", "2026-01-01", "2026-01-02", None, None, status="open", last=80.0)
+    still_open["cost_rt"] = 0.0
+    r2 = PF.replay([still_open], 100.0, 50.0, 1, marks={2: {"2026-01-02": 100.0, "2026-01-05": 80.0}})
+    assert abs(r2["max_drawdown"] - (-0.10)) < 1e-9 and r2["positions"][0]["pnl"] == -10.0

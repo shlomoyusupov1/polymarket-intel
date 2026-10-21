@@ -66,23 +66,48 @@ def limits(s: dict) -> dict:
 
 
 # ---------------------------------------------------------------- sizing
-def size(s: dict, price: float, stop: float | None = None, typical_loss: float | None = None) -> dict:
-    """Position for one stock/coin trade under the owner's limits. Plain-language notes explain each number.
-    stop: the owner's own stop price (the lab strategies define none). typical_loss: the strategy's
-    measured average losing trade (fraction), used only to describe a bad case when there is no stop."""
+def _fee(s: dict, position: float) -> float | None:
+    """Round-trip broker fee for a position, or None when the owner hasn't entered his fee."""
+    if s.get("fee_min") is None:
+        return None
+    return 2 * max(s["fee_min"], position * s.get("fee_pct", 0) / 100)
+
+
+def size(s: dict, price: float, stop: float | None = None, typical_loss: float | None = None,
+         stress_loss: float | None = None) -> dict:
+    """Position for one stock/coin trade under the owner's limits, with four risk figures kept apart:
+
+      exposure      the most of the budget in one position (profile cap)
+      planned loss  only with a stop: units x (entry - stop) + fees; sized so it stays within risk_usd
+      stress loss   without a stop: the strategy's own measured bad case — the 5th percentile of its
+                    hold-period return after cost in the out-of-sample backtest (stocklab raw_p5);
+                    sized so that this loss stays within risk_usd
+      max loss      without a stop the whole position can be lost (gaps, halts); always shown, never hidden
+    A missing stress figure is said plainly and the position falls back to the exposure cap.
+    Plain-language notes explain each number."""
     L = limits(s)
     notes, ok = [], True
     if not price or price <= 0:
         return {"ok": False, "notes": ["אין מחיר עדכני, אז אי אפשר לחשב גודל עסקה."]}
-    position = L["max_position_usd"] if stop is not None else min(L["max_position_usd"], L["risk_usd"])
-    by = "תקרת הפסד מלא" if stop is None else "תקרה"
+    position, by = L["max_position_usd"], "תקרה"
+    fee0 = _fee(s, position) or 0.0
+    budget_for_loss = L["risk_usd"] - fee0
     if stop is not None:
         if stop >= price:
             return {"ok": False, "notes": ["מחיר העצירה חייב להיות מתחת למחיר הכניסה."]}
-        per_unit = price - stop
-        units_risk = L["risk_usd"] / per_unit
-        if units_risk * price < position:
-            position, by = units_risk * price, "סיכון"
+        if budget_for_loss <= 0:
+            ok = False
+            notes.append(f"העמלה לבדה ({fee0:,.2f}$) גדולה מההפסד המותר לעסקה ({L['risk_usd']:,.2f}$). אין גודל עסקה שעומד במגבלה.")
+        else:
+            units_risk = budget_for_loss / (price - stop)
+            if units_risk * price < position:
+                position, by = units_risk * price, "סיכון"
+    elif stress_loss is not None and stress_loss < 0:
+        if budget_for_loss <= 0:
+            ok = False
+            notes.append(f"העמלה לבדה ({fee0:,.2f}$) גדולה מההפסד המותר לעסקה ({L['risk_usd']:,.2f}$). אין גודל עסקה שעומד במגבלה.")
+        elif budget_for_loss / abs(stress_loss) < position:
+            position, by = budget_for_loss / abs(stress_loss), "תרחיש קיצון"
     units = position / price
     if not s.get("fractional", True):
         units = int(units)
@@ -90,28 +115,29 @@ def size(s: dict, price: float, stop: float | None = None, typical_loss: float |
         if units == 0:
             ok = False
             notes.append(f"במחיר {price:,.2f}$ אי אפשר לקנות אפילו יחידה אחת בסכום הזה. צריך חשבון שמאפשר שברי מניות, או תקציב גדול יותר.")
-    fee_rt = None
-    if s.get("fee_min") is not None:
-        one = max(s["fee_min"], position * s.get("fee_pct", 0) / 100)
-        fee_rt = 2 * one
+    fee_rt = _fee(s, position) if position else None
     planned_loss = (units * (price - stop) + (fee_rt or 0)) if stop is not None else None
+    stress_usd = position * abs(stress_loss) + (fee_rt or 0) if stress_loss is not None and stop is None else None
     bad_case = position * abs(typical_loss) + (fee_rt or 0) if typical_loss is not None and stop is None else None
-    max_loss_without_stop = position + (fee_rt or 0) if stop is None else None
-    if (planned_loss is not None and planned_loss > L["risk_usd"] + 1e-9) or (
-            max_loss_without_stop is not None and max_loss_without_stop > L["risk_usd"] + 1e-9):
-        ok = False
-        notes.append("עלות העסקה וההפסד האפשרי חורגים ממגבלת הסיכון. אין לבצע לפי גודל זה.")
-    notes.append(f"הסכום לעסקה: {position:,.2f}$ מתוך {s['budget']:,.0f}$ — "
-                 + ("מוגבל לפי כמה מותר להפסיד אם העצירה תופעל." if by == "סיכון"
-                    else "מוגבל להפסד מלא אפשרי כי לא הוגדרה עצירה." if by == "תקרת הפסד מלא"
-                    else f"התקרה לעסקה אחת בפרופיל {L['profile_label']} ({L['max_position_pct']:.0%} מהתקציב)."))
+    max_loss = position + (fee_rt or 0)
+    notes.append(f"הסכום לעסקה: {position:,.2f}$ מתוך {s['budget']:,.0f}$ — " + {
+        "סיכון": "מוגבל כך שאם העצירה תופעל, ההפסד כולל העמלה לא יעבור את המגבלה שלך.",
+        "תרחיש קיצון": "מוגבל כך שגם בתרחיש הרע של השיטה (5% העסקאות הגרועות) ההפסד לא יעבור את המגבלה שלך.",
+        "תקרה": f"התקרה לעסקה אחת בפרופיל {L['profile_label']} ({L['max_position_pct']:.0%} מהתקציב)."}[by])
     if stop is not None:
         notes.append(f"אם יוצאים בעצירה ({stop:,.2f}$) ההפסד המתוכנן הוא בערך {planned_loss:,.2f}$, "
                      f"והמגבלה שלך היא {L['risk_usd']:,.2f}$ לעסקה. בפער פתיחה או בתנועה חדה היציאה יכולה להיות במחיר גרוע יותר.")
     else:
-        notes.append(f"לא הוגדרה עצירת הפסד. הפסד מלא אפשרי של עד {position:,.2f}$ לפני עלויות; ההקצאה מוגבלת בהתאם. היציאה היא לפי זמן.")
+        notes.append("לא הוגדרה עצירת הפסד. היציאה היא לפי זמן.")
+        if stress_usd is not None:
+            notes.append(f"תרחיש קיצון: ב-5% מהעסקאות הגרועות של השיטה (בבדיקה על העבר) ההפסד היה {abs(stress_loss):.1%} או יותר — "
+                         f"על הסכום הזה בערך {stress_usd:,.2f}$ כולל עמלה.")
+        else:
+            notes.append("אין לשיטה הזו נתון תרחיש קיצון מהמעבדה, לכן הגודל הוא רק לפי תקרת החשיפה ולא לפי סיכון.")
         if bad_case is not None:
-            notes.append(f"בעסקה מפסידה טיפוסית של השיטה הזו (בבדיקה על העבר) ההפסד היה בערך {bad_case:,.2f}$ על הסכום הזה.")
+            notes.append(f"בעסקה מפסידה ממוצעת של השיטה ההפסד היה בערך {bad_case:,.2f}$ על הסכום הזה.")
+    notes.append(f"הפסד מקסימלי אפשרי: כל הסכום ({max_loss:,.2f}$ כולל עמלה) — במקרה של קריסה, פער פתיחה חד או הפסקת מסחר."
+                 if stop is None else "בלי עצירה מבוצעת בפועל, גם כאן ההפסד המקסימלי הוא כל הסכום.")
     if fee_rt is None:
         notes.append("לא הזנת את עמלת הברוקר, אז העלות לא כלולה. בחשבון קטן היא יכולה לאכול את כל הרווח.")
     else:
@@ -121,9 +147,9 @@ def size(s: dict, price: float, stop: float | None = None, typical_loss: float |
             ok = False
             notes.append("העמלה גבוהה מ-1% מהסכום. עסקה קצרה כזו לא מעשית בתקציב הזה.")
     return {"ok": ok, "position_usd": position, "units": units, "sized_by": by, "fee_round_trip": fee_rt,
-            "planned_loss": planned_loss, "bad_case_loss": bad_case, "max_loss_without_stop": max_loss_without_stop,
-            "cash_left": s["budget"] - position,
-            "limits": L, "notes": notes}
+            "planned_loss": planned_loss, "stress_loss_usd": stress_usd, "bad_case_loss": bad_case,
+            "max_loss_usd": max_loss, "cash_left": s["budget"] - position, "limits": L, "notes": notes,
+            "risk_basis": "stop" if stop is not None else ("stress" if stress_usd is not None else "exposure_only")}
 
 
 def polymarket_buy(stake: float, levels_asks: list[tuple[float, float]] | None, mid: float | None,
@@ -200,7 +226,7 @@ def opportunities(conn, entries: list[dict], labs: dict) -> list[dict]:
             "stop": None, "stop_why": "האסטרטגיה נבדקה בלי עצירת הפסד. אפשר להגדיר עצירה משלך במחשבון.",
             "horizon": f"{hold} {'ימי מסחר' if market == 'stocks' else 'ימים'}", "risk": _risk_level(atr), "atr_pct": atr,
             "research": status, "research_why": e["why"] if e else "השיטה עוד לא נבדקה", "updated": rec,
-            "typical_loss": spec.get("avg_loss"), "typical_win": spec.get("avg_win"),
+            "typical_loss": spec.get("avg_loss"), "typical_win": spec.get("avg_win"), "stress_loss": spec.get("raw_p5"),
         })
     try:
         from . import tips as T
@@ -294,7 +320,8 @@ def plan(row: dict, s: dict, extra: dict | None = None) -> dict:
         return out
 
     price = row.get("price")
-    sz = size(s, price, typical_loss=row.get("typical_loss")) if price else {"ok": False, "notes": ["אין מחיר עדכני."]}
+    sz = (size(s, price, typical_loss=row.get("typical_loss"), stress_loss=row.get("stress_loss"))
+          if price else {"ok": False, "notes": ["אין מחיר עדכני."]})
     out["sizing"] = sz
     why_here = {"signal": f"השיטה \"{row['strategy']}\" נתנה איתות על {row['asset']}.",
                 "tip": f"{row['asset']} הגיע כטיפ ({row['strategy']}).",

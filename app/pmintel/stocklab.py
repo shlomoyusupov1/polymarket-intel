@@ -380,7 +380,9 @@ def _excess(f: dict, i: int, hold: int, spy: list[dict], sidx: dict, lag: int = 
         return None
     r = f["c"][x] / f["o"][e] - 1
     rs = spy[s[0] + hold - 1]["c"] / s[1]["o"] - 1
-    return sd * (r - rs) - f["cost"][i], f["day"][e], f["cost"][i]
+    # (scored excess, entry day, cost, the asset's own return over the hold) — the raw return feeds the
+    # stress-loss figure used for sizing a position without a stop
+    return sd * (r - rs) - f["cost"][i], f["day"][e], f["cost"][i], r
 
 
 def trades(name: str, p: dict, hold: int, feats: dict, spy: list[dict], sidx: dict, lag: int = 0) -> list[dict]:
@@ -393,7 +395,7 @@ def trades(name: str, p: dict, hold: int, feats: dict, spy: list[dict], sidx: di
             ex = _excess(f, i, hold, spy, sidx, lag, sd)
             if ex is None:
                 continue
-            out.append({"sym": sym, "entry": ex[1], "x": ex[0], "cost": ex[2]})
+            out.append({"sym": sym, "entry": ex[1], "x": ex[0], "cost": ex[2], "raw": ex[3] - ex[2]})
             nxt = i + hold + lag  # no new copy of the same bet while this one is open
     return out
 
@@ -465,13 +467,17 @@ def summarize(oos: list[dict]) -> dict:
         years.setdefault(t["entry"][:4], []).append(t["x"] - t["base"])
     # cumulative excess per trade in entry order: the deepest fall from a running peak (sum of trades, not
     # an account curve — overlapping trades aren't sized; it shows losing streaks, not a portfolio drawdown)
+    raws = sorted(t["raw"] for t in oos if "raw" in t)
+    pctl = lambda q: raws[min(len(raws) - 1, int(q * (len(raws) - 1)))] if raws else None  # noqa: E731
     cum = peak = dd = 0.0
     for t in sorted(oos, key=lambda t: t["entry"]):
         cum += t["x"]
         peak = max(peak, cum)
         dd = min(dd, cum - peak)
     return {"n": n, "symbols": len({t["sym"] for t in oos}), "success_rate": k / n if n else None,
-            "clusters": len(set(keys)), "first_entry": min(t["entry"] for t in oos) if n else None,
+            "clusters": len(set(keys)),
+            # the asset's own return over the hold after cost (not vs the benchmark): what a holder loses
+            "raw_p5": pctl(0.05), "raw_p1": pctl(0.01), "raw_worst": raws[0] if raws else None, "first_entry": min(t["entry"] for t in oos) if n else None,
             "last_entry": max(t["entry"] for t in oos) if n else None, "max_dd_sum": dd if n else None,
             "success_lo95": _wilson_lo(k, n) if n else None,
             "mean_excess": m, "mean_excess_lo95": (m - 1.96 * se) if se else None,

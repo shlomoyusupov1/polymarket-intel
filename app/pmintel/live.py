@@ -138,8 +138,9 @@ class Monitor:
                 m = CRYPTO if row["strategy"].startswith("crypto:") else STOCKS
                 row["sealed_ok"] = row["recorded_at"] < LP.deadline(str(row["signal_day"]), m)
             L = plans.limits(plans.get_settings(self.conn))
-            cap = min(L["max_position_usd"], L["risk_usd"])
-            pf = PF.replay(rows, L["budget"], cap, L["max_open"])
+            # same sizing as the portfolio page (exposure cap); the risk alert fires when a position's
+            # paper loss exceeds the owner's per-trade risk limit
+            pf = PF.replay(rows, L["budget"], L["max_position_usd"], L["max_open"])
             self.risk_usd = L["risk_usd"]
             self.positions = {p["symbol"]: p for p in pf["positions"]}
         except Exception as e:  # noqa: BLE001

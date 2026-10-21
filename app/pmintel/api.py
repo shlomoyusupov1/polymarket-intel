@@ -445,10 +445,10 @@ def virtual_portfolio(scope: str = "all"):
     from . import lab_paper as LP, plans, portfolio as PF
     from .cryptolab import CRYPTO
     from .stocklab import STOCKS
-    if scope not in ("all", "proven"):
-        raise HTTPException(400, "scope must be all or proven")
-    cols = ["id", "strategy", "symbol", "signal_day", "recorded_at", "sha256", "lab_verdict", "hold", "cost_rt", "status",
-            "entry_day", "entry_price", "exit_day", "ret", "spy_ret", "excess", "last_price", "last_day"]
+    if scope not in ("all", "validating", "confirmed"):
+        raise HTTPException(400, "scope must be all, validating or confirmed")
+    cols = ["id", "strategy", "symbol", "signal_day", "recorded_at", "sha256", "lab_verdict", "strategy_state", "hold",
+            "cost_rt", "status", "entry_day", "entry_price", "exit_day", "ret", "spy_ret", "excess", "last_price", "last_day"]
     rows = q(f"SELECT {', '.join(cols)} FROM lab_signals ORDER BY id") if _has_table("lab_signals") else []
     live = {}
     if _has_table("live_prices"):
@@ -464,31 +464,33 @@ def virtual_portfolio(scope: str = "all"):
         r["price_live"] = bool(lp and lp[1])
         if lp and lp[1]:
             r["last_price"], r["last_day"] = lp[0]["price"], lp[0]["src_ts"]
-    # Do not reclassify an old signal based on a research verdict achieved AFTER
-    # its entry. A sealed, contemporaneous forward-confirmed tag is required.
-    # Until the producer stores that tag, 'proven' correctly remains empty.
     labs = {"": (lab_latest() or {}).get("result") or {}, "crypto:": (lab_latest("crypto") or {}).get("result") or {}}
     labels = {pre + k: v.get("label", k) for pre, rep in labs.items() for k, v in (rep.get("strategies") or {}).items()}
     with db.connect() as c:
         s = plans.get_settings(c)
     L = plans.limits(s)
-    # No actual stop exists for these paper lab trades. Cap stake at a total-loss
-    # risk budget, rather than pretending an estimated typical loss is a stop.
-    cap = min(L["max_position_usd"], L["risk_usd"])
-    res = PF.replay(rows, L["budget"], cap, L["max_open"],
-                    eligible_at_signal=(lambda r: r.get("lab_verdict") == "forward_confirmed")
-                    if scope == "proven" else None)
+    # Eligibility is the strategy's state SEALED WITH THE SIGNAL (lab_paper.state_now), never a verdict
+    # reached later. Signals recorded before that field existed have no state and are not eligible.
+    wanted = {"validating": ("validating", "confirmed"), "confirmed": ("confirmed",)}.get(scope)
+    marks: dict = {}
+    if _has_table("lab_marks"):
+        for m in q("SELECT signal_id, day, close FROM lab_marks"):
+            marks.setdefault(m["signal_id"], {})[str(m["day"])] = m["close"]
+    # Position size = the profile's exposure cap: that is how a strategy is measured. Risk is reported
+    # separately (stress loss per plan card; live risk alerts when a paper loss exceeds risk_usd).
+    res = PF.replay(rows, L["budget"], L["max_position_usd"], L["max_open"],
+                    eligible_at_signal=(lambda r: r.get("strategy_state") in wanted) if wanted else None, marks=marks)
     by_id = {r["id"]: r for r in rows}
     for p in res["positions"]:
         p["label"] = labels.get(p["strategy"], p["strategy"])
         p["price_live"] = by_id.get(p["id"], {}).get("price_live", False)
-    proven = sorted({r["strategy"] for r in rows
-                     if r.get("lab_verdict") == "forward_confirmed" and r.get("sealed_ok")})
+    counts = {k: sum(1 for r in rows if r.get("strategy_state") == k) for k in ("confirmed", "validating", "not_eligible")}
     return {**res, "history": PF.history(rows, res["decisions"], labels)[:300],
-            "limits": L, "scope": scope, "position_cap_usd": cap,
-            "simulation_note": "סימולציית מה-היה-קורה לפי ההגדרות הנוכחיות — לא יומן החלטות נעול בזמן אמת.",
-            "risk_note": "אין עצירה מוגדרת בשיטות המעבדה. הפוזיציה מוגבלת לתקציב הפסד מלא.",
-            "decisions": None, "proven_strategies": proven}
+            "limits": L, "scope": scope, "position_cap_usd": L["max_position_usd"], "state_counts": counts,
+            "simulation_note": "התיק מחושב מחדש מהאיתותים לפי ההגדרות של היום — לא יומן החלטות נעול בזמן אמת.",
+            "risk_note": "אין עצירה בשיטות המעבדה, לכן כל פוזיציה יכולה להפסיד את כל הסכום. גודל הפוזיציה כאן הוא תקרת החשיפה "
+                         "בפרופיל, כדי למדוד את השיטה; הסיכון לעסקה מוצג בכרטיס העסקה (תרחיש קיצון) ובהתראות הסיכון.",
+            "decisions": None}
 
 
 def _opps():

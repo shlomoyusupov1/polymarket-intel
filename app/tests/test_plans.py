@@ -9,19 +9,28 @@ DB = os.environ.get("PMINTEL_TEST_DB")
 S = {**P.DEFAULTS, "budget": 1000.0, "profile": "moderate"}
 
 
-def test_size_by_cap_without_stop_and_says_loss_is_not_capped():
+def test_without_stop_or_stress_data_size_is_the_exposure_cap_and_says_so():
     r = P.size(S, 50.0, typical_loss=-0.06)
-    assert r["sized_by"] == "תקרת הפסד מלא" and abs(r["position_usd"] - 10) < 1e-9 and abs(r["units"] - 0.2) < 1e-9
-    assert abs(r["bad_case_loss"] - 10 * 0.06) < 1e-9 and r["planned_loss"] is None
-    assert r["max_loss_without_stop"] == 10
-    assert any("לא הוגדרה עצירת הפסד" in n for n in r["notes"]) and any("עמלת הברוקר" in n for n in r["notes"])
+    assert r["sized_by"] == "תקרה" and abs(r["position_usd"] - 330) < 1e-9 and r["risk_basis"] == "exposure_only"
+    assert abs(r["bad_case_loss"] - 330 * 0.06) < 1e-9 and r["planned_loss"] is None and r["max_loss_usd"] == 330
+    notes = " ".join(r["notes"])
+    assert "לא הוגדרה עצירת הפסד" in notes and "אין לשיטה הזו נתון תרחיש קיצון" in notes and "עמלת הברוקר" in notes
+    assert "הפסד מקסימלי אפשרי: כל הסכום" in notes and r["ok"]
+
+
+def test_without_stop_the_strategy_stress_loss_sizes_the_position():
+    r = P.size(S, 50.0, stress_loss=-0.15)                    # 5% worst holds lost 15%+; risk limit $10
+    assert r["sized_by"] == "תרחיש קיצון" and abs(r["position_usd"] - 10 / 0.15) < 1e-9 and r["risk_basis"] == "stress"
+    assert abs(r["stress_loss_usd"] - 10) < 1e-9 and abs(r["max_loss_usd"] - 10 / 0.15) < 1e-9
+    mild = P.size(S, 50.0, stress_loss=-0.01)                 # tiny tail: the exposure cap binds instead
+    assert mild["sized_by"] == "תקרה" and mild["position_usd"] == 330
 
 
 def test_size_by_owner_stop_respects_risk_limit_and_flags_fees():
     s = {**S, "fee_min": 2.5}
-    r = P.size(s, 50.0, stop=48.0)           # risk $10 / $2 per share = 5 shares = $250 < $330 cap
-    assert r["sized_by"] == "סיכון" and abs(r["units"] - 5) < 1e-9 and abs(r["position_usd"] - 250) < 1e-9
-    assert abs(r["planned_loss"] - (10 + 5.0)) < 1e-9 and r["fee_round_trip"] == 5.0
+    r = P.size(s, 50.0, stop=48.0)           # ($10 risk - $5 fees) / $2 per share = 2.5 shares = $125
+    assert r["sized_by"] == "סיכון" and abs(r["units"] - 2.5) < 1e-9 and abs(r["position_usd"] - 125) < 1e-9
+    assert abs(r["planned_loss"] - 10.0) < 1e-9 and r["fee_round_trip"] == 5.0   # fees included: exactly the limit
     assert r["ok"] is False and any("לא מעשית" in n for n in r["notes"])   # $5 on $250 = 2% > 1%
     assert P.size(S, 50.0, stop=51.0)["ok"] is False
     whole = P.size({**S, "budget": 100.0, "fractional": False}, 500.0)
@@ -61,20 +70,27 @@ def test_opportunities_and_plan_never_invent_targets(monkeypatch):
         p = tc.get(f"/api/plan/signal/{sig['id']}").json()
         titles = [x["title"] for x in p["sections"]]
         assert titles[:4] == ["מה אנחנו בוחנים", "מתי להיכנס", "כמה כסף", "מתי לצאת"]
-        assert abs(p["sizing"]["position_usd"] - 2.5) < 1e-9  # no stop: 0.5% full-loss limit
+        assert abs(p["sizing"]["position_usd"] - 125) < 1e-9  # no stop, no stress data: exposure cap (25% of $500)
+        assert p["sizing"]["risk_basis"] == "exposure_only"
         assert any("להמתין" in l for x in p["sections"] for l in x["lines"])
         size = tc.get("/api/size", params={"price": 100, "stop": 95}).json()
-        assert abs(size["units"] - 0.5) < 1e-9                       # $2.50 risk / $5 per share
+        assert abs(size["units"] - 0.1) < 1e-9                       # ($2.50 risk - $2 fees) / $5 per share
         assert tc.get("/api/plan/signal/999999").status_code == 404
         pf = tc.get("/api/portfolio").json()
         assert pf["value"] == 500 and pf["history"][0]["decision"] == "ממתין לכניסה" and pf["history"][0]["sealed_before_entry"]
-        assert tc.get("/api/portfolio", params={"scope": "proven"}).json()["history"][0]["decision"] == "דילוג"
-        assert tc.get("/api/portfolio", params={"scope": "x"}).status_code == 400
+        v = tc.get("/api/portfolio", params={"scope": "validating"}).json()
+        assert v["history"][0]["decision"] == "דילוג" and v["state_counts"] == {"confirmed": 0, "validating": 0, "not_eligible": 0}
+        assert tc.get("/api/portfolio", params={"scope": "proven"}).status_code == 400
 
-def test_no_stop_fees_can_invalidate_full_loss_budget():
-    s = {**S, "budget": 100.0, "profile": "moderate", "fee_min": 1.0}
-    result = P.size(s, 50.0)
-    assert result["position_usd"] == 1.0
-    assert result["max_loss_without_stop"] == 3.0
-    assert not result["ok"]
-    assert any("חורגים ממגבלת הסיכון" in note for note in result["notes"])
+def test_a_reasonable_fee_keeps_a_stopless_trade_practical():
+    s = {**S, "fee_min": 0.25}                                   # $0.50 round trip
+    r = P.size(s, 50.0, stress_loss=-0.10)
+    assert r["ok"] and abs(r["position_usd"] - 95) < 1e-9        # ($10 - $0.50) / 10%
+    assert abs(r["stress_loss_usd"] - 10.0) < 1e-9
+
+
+def test_fees_larger_than_the_risk_limit_make_any_size_impossible():
+    s = {**S, "budget": 100.0, "fee_min": 1.0}                   # risk $1, fees $2
+    for kw in ({"stress_loss": -0.1}, {"stop": 45.0}):
+        r = P.size(s, 50.0, **kw)
+        assert not r["ok"] and any("העמלה לבדה" in n for n in r["notes"])

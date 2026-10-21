@@ -2,6 +2,8 @@
 # Production Evidence Report — run on the server:
 #   bash scripts/evidence.sh             # state of the system (a few seconds)
 #   bash scripts/evidence.sh --research  # also runs the stock lab, crypto lab and Polymarket research first (~10-30 min)
+#   bash scripts/evidence.sh --light     # hourly health report: database reads only — no extra containers, no
+#                                        # backup/restore, no raw log lines (used by scripts/push-report.sh)
 # Writes reports/evidence-<UTC timestamp>.md and prints it. Contains no secrets.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -10,6 +12,7 @@ TS=$(date -u +%Y%m%dT%H%M%SZ)
 OUT="reports/evidence-$TS.md"
 ADDR=$(grep '^SITE_ADDRESS=' .env | cut -d= -f2)
 psql() { sudo docker compose exec -T db psql -U pmintel -d pmintel -AF ' | ' -c "$1" 2>&1; }
+LIGHT=0; [ "${1:-}" = "--light" ] && LIGHT=1
 
 if [ "${1:-}" = "--research" ]; then
   echo "running research (stocks, crypto, Polymarket) — this takes a while…"
@@ -66,8 +69,17 @@ echo
 echo "errors in the last 72h (newest 15):"
 psql "SELECT job, started_at, left(error, 160) AS error FROM job_runs WHERE status IN ('error','interrupted') AND started_at > now() - interval '72 hours' ORDER BY id DESC LIMIT 15;"
 echo
-echo "service logs, last 72h, lines with ERROR/Traceback (newest 20):"
-sudo docker compose logs --since 72h --no-color 2>/dev/null | grep -E "ERROR|Traceback|Exception" | tail -n 20 || true
+if [ $LIGHT = 1 ]; then
+  echo "error lines per service, last hour (counts only — no log text leaves the server):"
+  for svc in $(sudo docker compose config --services 2>/dev/null); do
+    n=$(sudo docker compose logs --since 1h --no-color "$svc" 2>/dev/null | grep -cE "ERROR|Traceback|Exception" || true)
+    [ "${n:-0}" != "0" ] && echo "$svc: $n"
+  done
+  echo "(end)"
+else
+  echo "service logs, last 72h, lines with ERROR/Traceback (newest 20):"
+  sudo docker compose logs --since 72h --no-color 2>/dev/null | grep -E "ERROR|Traceback|Exception" | tail -n 20 || true
+fi
 echo '```'
 echo
 echo "## Order books"
@@ -87,16 +99,32 @@ echo '```'
 sudo docker compose exec -T api python -m pmintel.research_summary 2>&1
 echo '```'
 echo
-echo "## Collection cadence, gaps, host (72h)"
-echo '```'
-sudo docker compose run --rm --entrypoint python research -m pmintel.prod_report --hours 72 2>&1 | tail -n 60
-echo '```'
-echo
-echo "## Security & backup restore"
-echo '```'
-bash scripts/security-check.sh 2>&1
-echo "exit=$?"
-echo '```'
+if [ $LIGHT = 1 ]; then
+  echo "## Live market feeds"
+  echo '```'
+  psql "SELECT feed, connected, subscribed, round(extract(epoch FROM now()-last_msg_at)) AS last_msg_s, round(lag_mean::numeric,2) AS lag_mean_s, round(lag_p95::numeric,2) AS lag_p95_s, error FROM live_feeds ORDER BY feed;"
+  echo '```'
+  echo
+  echo "## Daily security & restore check (runs once a day, not here)"
+  echo '```'
+  if [ -f "$HOME/.pmintel/security-latest.txt" ]; then
+    echo "last run: $(date -r "$HOME/.pmintel/security-latest.txt" -Is)"; grep -E "^(PASS|FAIL)" "$HOME/.pmintel/security-latest.txt"
+  else
+    echo "not run yet (installed by scripts/install-report-push.sh)"
+  fi
+  echo '```'
+else
+  echo "## Collection cadence, gaps, host (72h)"
+  echo '```'
+  sudo docker compose run --rm --entrypoint python research -m pmintel.prod_report --hours 72 2>&1 | tail -n 60
+  echo '```'
+  echo
+  echo "## Security & backup restore"
+  echo '```'
+  bash scripts/security-check.sh 2>&1
+  echo "exit=$?"
+  echo '```'
+fi
 } | tee "$OUT"
 echo
 echo "Saved to $OUT"
