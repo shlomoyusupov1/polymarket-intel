@@ -57,3 +57,22 @@ Changed:
   daily at 04:10; research on demand. Token: one private repo, Contents RW, 90-day expiry.
 Still open: a locked decision journal (`paper_orders` written at decision time with the settings of that moment);
 external timestamping of the daily signal hash (e.g. publish it to the private repo).
+
+## Decisions (2026-10-25, owner: "יאלה תתחיל ולא צריך גיבוי")
+- **Gate changed from "60% success" to "proven net profit"** (stocks, crypto, forward tracking, tip sources).
+  Hit rate is not profit: crypto breakout_volume wins 44% of trades yet has the only robust edge in the lab.
+  Lab gate now: 50+ OOS trades; edge over random entry with 95% lower bound > 0 that survives Holm; mean
+  result vs the benchmark after cost with 95% lower bound > 0; edge positive in >= 60% of test years (years
+  with >= 5 trades); for fixed-cost markets (crypto) still positive at twice the assumed cost. Forward and
+  tips: 50+ results and a positive 95% lower bound of the mean after cost. Old reports keep their old
+  verdicts until the labs re-run.
+- **Polymarket: honest variant of the 24 h study** (`24_scheduled`): reference = scheduled end date, market
+  still open at the cutoff. The original study anchors on the actual close time, which a trader can't know;
+  markets that close early usually close because the event just happened. If the +28% disappears here, it
+  was look-ahead.
+- **Polymarket execution check** (`pm_paper.py`, runs in the collector every cycle): markets 23-25 h before
+  their scheduled end, each pre-declared rule that applies gets a sealed paper entry at the real ask VWAP for
+  $100 (or "unfillable"); settled on resolution with the taker fee. A rule is execution-validated at 30+
+  settled events with a positive lower bound; only then can the walk-forward verdict become "supported".
+  Paper only — no order code path exists.
+- Off-site backup: owner declined (not needed). Not set up.

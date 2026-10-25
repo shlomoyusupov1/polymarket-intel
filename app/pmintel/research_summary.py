@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from . import db
 
-V = {"candidate_for_paper": "HISTORICAL CANDIDATE", "edge_below_target": "FAILED (edge < 60% target)",
+V = {"candidate_for_paper": "HISTORICAL CANDIDATE", "edge_below_target": "EDGE, NOT NET PROFIT",
      "not_supported": "FAILED", "insufficient_data": "INSUFFICIENT DATA"}
 
 
@@ -61,6 +61,7 @@ def data_section(conn, now) -> list[str]:
          ("SEC 13D / earnings", "SELECT count(*), max(accepted) FROM sec_events"),
          ("ETF bars (paper room)", "SELECT count(*), max(day)::text FROM etf_bars"),
          ("Lab forward signals: stocks", "SELECT count(*), max(recorded_at) FROM lab_signals WHERE strategy NOT LIKE 'crypto:%%'"),
+         ("Polymarket execution check rows", "SELECT count(*), max(recorded_at) FROM pm_paper WHERE rule <> 'none'"),
          ("Lab forward signals: crypto", "SELECT count(*), max(recorded_at) FROM lab_signals WHERE strategy LIKE 'crypto:%%'"),
          ("Host metrics", "SELECT count(*), max(ts) FROM host_metrics")]
     for name, sql in q:
@@ -72,7 +73,7 @@ def data_section(conn, now) -> list[str]:
 def runs_section(conn, now) -> list[str]:
     out = ["## Research runs (all, newest first)"]
     rows = _rows(conn, """SELECT job, status, started_at, finished_at, items, left(coalesce(error, ''), 140)
-                          FROM job_runs WHERE job IN ('stocklab', 'cryptolab', 'research', 'backfill', 'lab_paper', 'crypto_paper')
+                          FROM job_runs WHERE job IN ('stocklab', 'cryptolab', 'research', 'backfill', 'lab_paper')
                           ORDER BY started_at DESC LIMIT 25""")
     if not rows:
         out.append("INSUFFICIENT DATA: no research job has ever run")
@@ -150,13 +151,37 @@ def polymarket_section(conn) -> list[str]:
         for h, x in (r[0] or {}).items():
             wf = (x or {}).get("walk_forward") or {}
             ot = wf.get("oos_trading") or {}
-            out.append(f"- {h} h before close: verdict {wf.get('verdict', 'n/a')} · OOS events {ot.get('events')} · "
-                       f"mean/$ after taker fee {pc(ot.get('mean_return'), 2)} · CI {ot.get('ci')}")
+            label = ("24 h before SCHEDULED end (honest: no look-ahead on close time)" if h == "24_scheduled"
+                     else f"{h} h before actual close")
+            ci = ot.get("ci")
+            out.append(f"- {label}: verdict {wf.get('verdict', 'n/a')} · OOS events {ot.get('events')} · "
+                       f"mean/$ after taker fee {pc(ot.get('mean_return'), 2)} · CI "
+                       f"{'—' if not ci else pc(ci[0], 2) + ' … ' + pc(ci[1], 2)} · rules {', '.join(ot.get('rules_chosen') or []) or '—'}")
         out.append("  note: history is mid/last-trade prices, not executable asks — a positive result is a hypothesis only")
     b = _one(conn, """SELECT count(*), round(100.0 * avg(valid::int), 1), count(DISTINCT market_id)
                       FROM orderbooks WHERE ts > now() - interval '24 hours'""")
     out.append(f"order books last 24 h: {b[0]} books, {b[2] if len(b) > 2 else '—'} markets, valid {b[1] if len(b) > 1 else '—'}% "
                "(valid = both sides quoted); no opportunity is marked executable without a live ask")
+    return out
+
+
+def pm_paper_section(conn) -> list[str]:
+    from . import pm_paper as PP
+    out = ["## Polymarket execution check (paper at real asks, 24 h before scheduled end, sealed)"]
+    try:
+        s = PP.summary(conn)
+    except Exception as e:  # noqa: BLE001
+        return out + [f"INSUFFICIENT DATA: {type(e).__name__} (table not created yet?)"]
+    out.append(f"markets looked at {s['markets_seen']} · last {s['last_recorded']} · stake ${s['stake_usd']:.0f} · "
+               f"validated needs {s['min_events']}+ settled events with the 95% lower bound > 0")
+    if not s["rules"]:
+        out.append("INSUFFICIENT DATA: no paper entry yet")
+    for k, v in s["rules"].items():
+        ci = v["ci_real"]
+        out.append(f"- {k}{' [chosen by the study]' if v['chosen'] else ''}: recorded {v['recorded']} · fillable {pr(v['fill_rate'])} · "
+                   f"ask above study price {pc(v['avg_ask_above_mid'], 1)} · settled events {v['events']} · "
+                   f"real {pc(v['mean_real'], 2)} (CI {'—' if not ci else pc(ci[0], 2) + ' … ' + pc(ci[1], 2)}) · "
+                   f"study-style on same trades {pc(v['mean_hist_same_trades'], 2)} -> {v['status'].upper()}")
     return out
 
 
@@ -182,7 +207,7 @@ def build(conn) -> str:
     for sec in (data_section(conn, now), runs_section(conn, now),
                 lab_section(conn, "stocklab_v1", "Stocks lab (out of sample, after cost)", "SPY"),
                 lab_section(conn, "cryptolab_v1", "Crypto lab (out of sample, after cost)", "BTC"),
-                forward_section(conn), polymarket_section(conn), tips_section(conn)):
+                forward_section(conn), polymarket_section(conn), pm_paper_section(conn), tips_section(conn)):
         parts += sec + [""]
     return "\n".join(parts)
 

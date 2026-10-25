@@ -132,14 +132,21 @@ STRATEGIES = [
 ]
 
 
-def load_rows(conn, horizon_h: int) -> list[dict]:
-    q = """
+def load_rows(conn, horizon_h: int, scheduled: bool = False) -> list[dict]:
+    """scheduled=False: reference = min(actual close, scheduled end) — the original study.
+    scheduled=True: reference = the scheduled end date only, which is all a trader knows in advance, and the
+    market must still have been open at the cutoff. The actual close time is NOT knowable beforehand: a market
+    that closes early usually closes because the event just happened, so anchoring on it picks the hours right
+    before the news (look-ahead). This variant is the honest one and is what the forward check reproduces."""
+    ref = "end_date" if scheduled else "LEAST(closed_time, COALESCE(end_date, closed_time))"
+    extra = "AND end_date IS NOT NULL AND closed_time >= end_date - make_interval(hours => %s)" if scheduled else ""
+    q = f"""
     WITH m AS (
       SELECT id, event_id, category, ref_outcome, resolved_outcome, volume,
              token_ids->>ref_index AS token_id,
-             LEAST(closed_time, COALESCE(end_date, closed_time)) - make_interval(hours => %s) AS cutoff
+             {ref} - make_interval(hours => %s) AS cutoff
       FROM markets
-      WHERE closed AND resolved_outcome IS NOT NULL AND ref_index IS NOT NULL AND closed_time IS NOT NULL
+      WHERE closed AND resolved_outcome IS NOT NULL AND ref_index IS NOT NULL AND closed_time IS NOT NULL {extra}
     )
     SELECT m.id, m.event_id, m.category, (m.resolved_outcome = m.ref_outcome)::int AS y,
            m.cutoff, ph.ts, ph.price, m.cutoff + make_interval(hours => %s) AS ref_time
@@ -149,7 +156,8 @@ def load_rows(conn, horizon_h: int) -> list[dict]:
                   ORDER BY ts DESC LIMIT 1) ph ON TRUE
     """
     out = []
-    for mid, event_id, cat, y, cutoff, ts, price, ref_time in conn.execute(q, (horizon_h, horizon_h)).fetchall():
+    params = (horizon_h, horizon_h, horizon_h) if scheduled else (horizon_h, horizon_h)
+    for mid, event_id, cat, y, cutoff, ts, price, ref_time in conn.execute(q, params).fetchall():
         if cutoff - ts > MAX_STALENESS or price is None or not (0 <= price <= 1):
             continue
         out.append({"market_id": mid, "event_id": event_id, "category": cat, "y": y, "p": float(price),
@@ -196,6 +204,20 @@ def run(conn) -> dict:
             rows = load_rows(conn, h)
             result[str(h)] = analyze(rows, config.RESEARCH_SLIPPAGE, config.RESEARCH_FEE)
             result[str(h)]["walk_forward"] = walk_forward(rows, h, config.RESEARCH_SLIPPAGE, config.RESEARCH_FEE)
+        # the honest variant of the one horizon that came out positive (see load_rows)
+        rows = load_rows(conn, 24, scheduled=True)
+        result["24_scheduled"] = analyze(rows, config.RESEARCH_SLIPPAGE, config.RESEARCH_FEE)
+        result["24_scheduled"]["walk_forward"] = walk_forward(rows, 24, config.RESEARCH_SLIPPAGE, config.RESEARCH_FEE)
+        # a positive walk-forward is upgraded only by the forward check at real asks (pm_paper)
+        try:
+            from . import pm_paper
+            fwd = pm_paper.summary(conn)
+            for key in ("24", "24_scheduled"):
+                pm_paper.apply_execution_check(result[key]["walk_forward"], fwd)
+            params["execution_check"] = {k: {kk: v.get(kk) for kk in ("events", "mean_real", "ci_real", "validated")}
+                                         for k, v in fwd["rules"].items()}
+        except Exception:  # noqa: BLE001 - the forward table may not exist yet; never blocks the study
+            log.exception("execution check unavailable")
         params["data_status"] = status
         conn.execute("INSERT INTO research_reports (kind, params, result) VALUES (%s, %s, %s)",
                      ("historical_v1", json.dumps(params, default=str), json.dumps(result, default=str)))

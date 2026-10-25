@@ -127,7 +127,7 @@ const ROUTES = [
   { id: "lab", path: "#/lab", label: "מעבדה", section: "stocks",
     lead: "כאן בודקים אם שיטות מסחר מוכרות היו מרוויחות ב-10 השנים האחרונות. שיטה שלא הוכחה — לא משתמשים בה." },
   { id: "tips", path: "#/tips", label: "מקורות", section: "stocks",
-    lead: "כל מקור טיפים נמדד מול SPY. מקור מקבל \"אמין\" רק אחרי 50 טיפים ו-60% הצלחה שאינה מקרית." },
+    lead: "כל מקור טיפים נמדד מול SPY. מקור מקבל \"אמין\" רק אחרי 50 טיפים ורווח נטו מוכח מול SPY." },
   { id: "etf", path: "#/etf", label: "חדר מסחר", section: "stocks",
     lead: "שתי אסטרטגיות על קרנות סל, בכסף מדומה, מול פשוט להחזיק את SPY. הכללים נקבעו מראש." },
   { id: "crypto", path: "#/crypto", label: "קריפטו", short: "קריפטו", icon: "coin",
@@ -544,11 +544,12 @@ PAGES.watchlist = async (view) => {
 
 // ---- Research Lab ----
 PAGES.research = async (view) => {
-  const r = await api("/api/research/latest");
+  const [r, pp] = await Promise.all([api("/api/research/latest"), api("/api/pm_paper")]);
   if (current !== "research") return;
   if (!r) { view.replaceChildren(empty("עדיין אין דוח מחקר. צריך להריץ backfill של שווקים שנפתרו ואז research.")); return; }
-  const LBL = { "24": "יום לפני הסגירה", "168": "שבוע לפני", "720": "חודש לפני" };
+  const LBL = { "24": "יום לפני הסגירה בפועל", "24_scheduled": "יום לפני מועד הסיום המתוכנן (בלי הצצה לעתיד)", "168": "שבוע לפני", "720": "חודש לפני" };
   view.replaceChildren(h("div", { class: "stack" },
+    pmPaperCard(pp),
     h("div", { class: "sub" }, `דוח מ-${new Date(r.created_at).toLocaleString("he-IL")} · החלקה ${r.params.slippage} · עמלה ${r.params.fee} · תשואות לפי אירוע`),
     ...Object.entries(r.result).map(([hz, res]) => h("div", { class: "cols-2" },
       card(`כיול · ${LBL[hz] || hz + " שע׳"}`, `${res.calibration.n} שווקים · Brier ${res.calibration.brier == null ? "—" : res.calibration.brier.toFixed(3)}`,
@@ -562,6 +563,23 @@ PAGES.research = async (view) => {
           h("td", null, h("span", { class: "badge" }, x.insample_ci_positive ? "חיובי בתוך המדגם בלבד" : "לא הוכח")))))))),
       wfCard(res.walk_forward)))));
 };
+function pmPaperCard(pp) {
+  if (!pp) return null;
+  const rules = Object.entries(pp.rules || {});
+  const ST = { validated: ["ok", "אומת במחיר אמיתי"], collecting: ["", "צובר"], failed: ["bad", "נכשל במחיר אמיתי"] };
+  const pc = (v) => v == null ? "—" : ltr(pct(v), v >= 0 ? "up" : "down");
+  return card("בדיקת ביצוע: האם הרווח מהעבר קיים במחיר שבאמת אפשר לקנות?",
+    `כל 15 דקות: שווקים שמסתיימים בעוד ~24 שעות. קונים על הנייר $${pp.stake_usd || 100} במחיר הקנייה האמיתי מספר הפקודות, נחתם לפני התוצאה. "אומת" = ${pp.min_events} אירועים שנסגרו וגם הגבול התחתון מעל 0. כסף מדומה בלבד.`,
+    !rules.length ? h("p", { class: "sub" }, `עוד אין רישומים. שווקים שנבדקו: ${pp.markets_seen || 0}.`) :
+    h("div", { class: "scroll-x" }, h("table", { class: "t" },
+      h("thead", null, h("tr", null, ["כלל", "נרשמו", "אפשר היה לקנות", "מחיר קנייה מעל מחיר המחקר", "נסגרו (אירועים)", "תשואה אמיתית", "המחקר היה נותן", "מצב"].map((x) => h("th", null, x)))),
+      h("tbody", null, rules.map(([k, v]) => { const [c, l] = ST[v.status] || ["", v.status];
+        return h("tr", null, h("td", null, ltr(k), v.chosen ? h("span", { class: "faint" }, " · נבחר במחקר") : null),
+          h("td", null, v.recorded), h("td", null, v.fill_rate == null ? "—" : ltr(pct(v.fill_rate, 0))),
+          h("td", null, pc(v.avg_ask_above_mid)), h("td", null, v.events),
+          h("td", null, pc(v.mean_real), v.ci_real ? h("span", { class: "faint" }, " (", ltr(`${pct(v.ci_real[0])} … ${pct(v.ci_real[1])}`), ")") : null),
+          h("td", null, pc(v.mean_hist_same_trades)), h("td", null, h("span", { class: "badge " + c }, l))); })))));
+}
 const WF_VERDICT = { supported: ["ok", "נתמך — עבר את כל השערים"], oos_positive_needs_execution_check: ["wait", "חיובי מחוץ למדגם — עדיין לא אומת ביצוע בספר פקודות"],
   not_supported: ["", "לא נתמך"], insufficient_data: ["", "אין מספיק נתונים"] };
 function wfCard(w) {
@@ -731,7 +749,7 @@ PAGES.tips = async (view) => {
     h("td", null, pctCell(t.r1)), h("td", null, pctCell(t.r5)), h("td", null, pctCell(t.r20)), h("td", null, pctCell(t.max_drawdown_20))); });
   view.replaceChildren(h("div", { class: "stack" },
     card("רישום טיפ ידני", "קיבלת המלצה בוואטסאפ? תרשום אותה כאן — המערכת תמדוד מה קרה אחרי", form, msg),
-    card("דירוג מקורות", d.rule + ". \"אמין\" = לפחות 50 טיפים, 60% ניצחו את SPY, רווח ממוצע חיובי אחרי עלויות, והתוצאה לא מקרית גם אחרי תיקון למספר המקורות שנבדקו", table(["מקור", "אמינות (ניצח SPY אחרי עלויות)", "טיפים", "נמדדו (5 ימים)", "חציון 5 ימים", "הרוויחו", "מול SPY (5 ימים)", "ניצחו את SPY", "ממוצע 20 יום", "הירידה הגרועה", "אדומים"], board,
+    card("דירוג מקורות", d.rule + ". \"אמין\" = לפחות 50 טיפים, רווח ממוצע חיובי אחרי עלויות (גם בגבול התחתון), והתוצאה לא מקרית גם אחרי תיקון למספר המקורות שנבדקו", table(["מקור", "אמינות (ניצח SPY אחרי עלויות)", "טיפים", "נמדדו (5 ימים)", "חציון 5 ימים", "הרוויחו", "מול SPY (5 ימים)", "ניצחו את SPY", "ממוצע 20 יום", "הירידה הגרועה", "אדומים"], board,
       "עוד אין טיפים. רשום ידנית, או חבר את טלגרם (הוראות ב-README).")),
     card("טיפים אחרונים", "לחיצה על סימול פותחת את בודק המניות", table(["זמן", "מקור", "סימול", "סיכון", "כניסה", "יום", "5 ימים", "20 יום", "ירידה מקס׳"], recent, "—")),
     h("p", { class: "faint" }, "עמודות התשואה בטבלאות הן לפני עלויות. עמודת האמינות כבר מורידה לכל מניה את עלות המסחר המשוערת שלה — במניות זולות זה יכול להגיע לכמה אחוזים לעסקה. אין כאן המלצה לקנות דבר.")));
@@ -1380,7 +1398,7 @@ async function labPage(view, market) {
   if (!d) { view.replaceChildren(card("המעבדה עוד לא רצה", M.empty,
     h("p", null, "מריצים פעם אחת בשרת:"), h("pre", { class: "code", dir: "ltr" }, `sudo docker compose run --rm ${M.job}`))); return; }
   const r = d.result, S = r.strategies;
-  const V = { candidate_for_paper: ["ok", "מועמדת למעקב בכסף מדומה"], edge_below_target: ["wait", "יש יתרון, מתחת ל-60%"],
+  const V = { candidate_for_paper: ["ok", "מועמדת למעקב בכסף מדומה"], edge_below_target: ["wait", "יש יתרון על אקראי, עוד לא רווח נטו"],
     not_supported: ["bad", "לא עובדת"], insufficient_data: ["", "מעט מדי עסקאות"] };
   const ORDER = { candidate_for_paper: 0, edge_below_target: 1, not_supported: 2, insufficient_data: 3 };
   const list = Object.entries(S).sort((a, b) => (ORDER[a[1].verdict] - ORDER[b[1].verdict]) || ((b[1].edge_vs_baseline ?? -9) - (a[1].edge_vs_baseline ?? -9)));
@@ -1391,7 +1409,7 @@ async function labPage(view, market) {
   const head = winners.length
     ? h("section", { class: "verdict go" }, h("h2", null, winners.length === 1 ? "אסטרטגיה אחת עברה את הבדיקה על נתוני העבר" : `${winners.length} אסטרטגיות עברו את הבדיקה על נתוני העבר`),
         h("p", null, "השלב הבא: מעקב קדימה בכסף מדומה. בדיקה על העבר לבדה לא מספיקה כדי לסמוך עליהן."))
-    : h("section", { class: "verdict" }, h("h2", null, edge.length ? "יש יתרון קטן, אבל אף אסטרטגיה לא מגיעה ל-60%." : "אף אסטרטגיה לא עברה את הבדיקה."),
+    : h("section", { class: "verdict" }, h("h2", null, edge.length ? "יש יתרון על קנייה אקראית, אבל אף אסטרטגיה עוד לא הוכיחה רווח נטו מול המדד." : "אף אסטרטגיה לא עברה את הבדיקה."),
         h("p", null, "זו תוצאה אמיתית, לא כישלון של המערכת: רוב הכללים הפשוטים לא מנצחים את השוק אחרי עלויות. ממשיכים לבדוק רעיונות חדשים באותה שיטה."));
   const cardFor = ([k, v]) => { const [c, l] = V[v.verdict] || ["", v.verdict];
     const years = Object.entries(v.by_year || {});
@@ -1431,7 +1449,7 @@ async function labPage(view, market) {
         h("tbody", null, fp.recent.map((r) => h("tr", null, h("td", null, ltr(r.signal_day)), h("td", null, (S[r.strategy] || {}).label || r.strategy),
           h("td", null, market === "stocks" ? h("a", { href: "#/check/" + r.symbol }, ltr(r.symbol)) : ltr(r.symbol.replace("-USD", ""))), h("td", null, STAT[r.status] || r.status),
           h("td", null, r.excess == null ? "—" : signed(r.excess)))))))) : null,
-    h("p", { class: "faint" }, `אסטרטגיה "אומתה קדימה" רק אחרי ${fp ? fp.gate.min_n : 50} עסקאות אמיתיות קדימה, 60% הצלחה שאינה מקרית, ורווח ממוצע חיובי אחרי עלויות — וגם עברה את הבדיקה על העבר. רק אז מדברים על כסף אמיתי.`));
+    h("p", { class: "faint" }, `אסטרטגיה "אומתה קדימה" רק אחרי ${fp ? fp.gate.min_n : 50} עסקאות אמיתיות קדימה ורווח נטו מוכח אחרי עלויות (גבול תחתון חיובי) — וגם עברה את הבדיקה על העבר. רק אז מדברים על כסף אמיתי.`));
   view.replaceChildren(h("div", { class: "stack" }, head, forward,
     ...list.map(cardFor),
     card("איך נבדק", `${r.universe.length} ${M.what}, ${r.first_day} עד ${r.last_day}, מול ${M.bench}`,
