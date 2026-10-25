@@ -31,6 +31,7 @@ def test_signals_are_sealed_before_the_open_and_settled_like_the_backtest(monkey
     conn.execute("DROP TABLE IF EXISTS lab_signals CASCADE")
     db.init_schema(conn)
     conn.execute("DELETE FROM research_reports WHERE kind = 'stocklab_v1'")
+    conn.execute("DELETE FROM lab_marks")
     lab = {"strategies": {"rsi2_pullback": {"verdict": "not_supported", "current_params": {"params": {"t": 101}, "hold": 5}}}}
     conn.execute("INSERT INTO research_reports (kind, params, result) VALUES ('stocklab_v1', '{}', %s)", (Jsonb(lab),))
     full = {s: walk(k, 420, drift=0.002) for k, s in enumerate([L.BENCH] + list(L.UNIVERSE[:3]))}
@@ -54,4 +55,16 @@ def test_signals_are_sealed_before_the_open_and_settled_like_the_backtest(monkey
     cost = L.features(b[:cut])["cost"][-1]
     want = (b[cut + 4]["c"] / b[cut]["o"] - 1) - (spy[cut + 4]["c"] / spy[cut]["o"] - 1) - cost
     assert st == "closed" and exit_day.isoformat() == b[cut + 4]["day"] and abs(ex - want) < 1e-9
+    state = conn.execute("SELECT DISTINCT strategy_state FROM lab_signals").fetchall()
+    assert state == [("not_eligible",)]                       # the lab verdict was not_supported when sealed
+    sid = conn.execute("SELECT id FROM lab_signals WHERE symbol = %s AND signal_day = %s", (sym, day0)).fetchone()[0]
+    days = [d.isoformat() for (d,) in conn.execute("SELECT day FROM lab_marks WHERE signal_id = %s ORDER BY day", (sid,))]
+    assert days[0] == b[cut]["day"] and days[-1] == b[cut + 4]["day"] and len(days) == 5   # entry .. exit, daily
     conn.close()
+
+
+def test_state_now_is_sealed_from_history_and_forward_record():
+    assert P.state_now("not_supported", {"status": "confirmed"}) == "not_eligible"
+    assert P.state_now("candidate_for_paper", None) == "validating"
+    assert P.state_now("candidate_for_paper", {"status": "collecting"}) == "validating"
+    assert P.state_now("candidate_for_paper", {"status": "confirmed"}) == "confirmed"

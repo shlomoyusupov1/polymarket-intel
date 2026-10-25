@@ -7,7 +7,7 @@ deadline=$(( $(date +%s) + ${HEALTH_TIMEOUT:-150} ))
 while :; do
   ok=1
   sudo -n docker compose exec -T api python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=5).status == 200 else 1)" >/dev/null 2>&1 || ok=0
-  for svc in db api web collector etf tips backup; do
+  for svc in db api web collector etf tips backup live; do
     state=$(sudo -n docker compose ps --format '{{.State}}' "$svc" 2>/dev/null | head -1)
     [ "$state" = "running" ] || ok=0
   done

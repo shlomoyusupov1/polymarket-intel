@@ -314,3 +314,65 @@ CREATE TABLE IF NOT EXISTS owner_settings (
     value      jsonb NOT NULL,
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Live market monitor (pmintel/live.py): latest price per watched asset, sampled ticks, feed health, alerts
+CREATE TABLE IF NOT EXISTS live_prices (
+    asset      text PRIMARY KEY,           -- cx:BTC-USD | st:SPY | pm:<token>
+    cls        text NOT NULL,              -- crypto | stocks | polymarket
+    name       text NOT NULL,
+    source     text NOT NULL,
+    price      double precision,
+    bid        double precision,
+    ask        double precision,
+    src_ts     timestamptz,                -- the source's own time for this price
+    recv_ts    timestamptz,                -- when we received it
+    fresh      boolean NOT NULL DEFAULT false,
+    roles      text[] NOT NULL DEFAULT '{}',
+    bad_ticks  integer NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS live_ticks (
+    asset   text NOT NULL,
+    src_ts  timestamptz NOT NULL,
+    recv_ts timestamptz NOT NULL,
+    price   double precision NOT NULL
+);
+CREATE INDEX IF NOT EXISTS live_ticks_idx ON live_ticks (asset, src_ts DESC);
+CREATE TABLE IF NOT EXISTS live_feeds (
+    feed        text PRIMARY KEY,          -- polymarket | coinbase | yahoo
+    connected   boolean NOT NULL,
+    subscribed  integer NOT NULL DEFAULT 0,
+    msgs        bigint NOT NULL DEFAULT 0,
+    reconnects  integer NOT NULL DEFAULT 0,
+    last_msg_at timestamptz,
+    lag_mean    double precision,          -- seconds from source time to receipt, last 5 minutes
+    lag_p95     double precision,
+    error       text,
+    note        text,
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS live_alerts (
+    id          bigserial PRIMARY KEY,
+    level       text NOT NULL,             -- market | risk | strategy | data
+    kind        text NOT NULL,
+    asset       text NOT NULL,
+    text        text NOT NULL,
+    payload     jsonb NOT NULL DEFAULT '{}',
+    src_ts      timestamptz,
+    recv_ts     timestamptz,
+    detected_at timestamptz NOT NULL DEFAULT now(),
+    sent_at     timestamptz,
+    status      text NOT NULL DEFAULT 'pending'   -- pending | sent | failed | suppressed
+);
+CREATE INDEX IF NOT EXISTS live_alerts_status_idx ON live_alerts (status, id);
+
+-- research state of the strategy AT THE MOMENT a signal was sealed (lab_paper.record_signals):
+-- confirmed (passed history + forward) | validating (passed history, forward under way) | not_eligible
+ALTER TABLE lab_signals ADD COLUMN IF NOT EXISTS strategy_state text;
+-- daily closing marks of every open paper position (lab_paper.settle), for a marked-to-market equity curve
+CREATE TABLE IF NOT EXISTS lab_marks (
+    signal_id bigint NOT NULL,
+    day       date NOT NULL,
+    close     double precision NOT NULL,
+    PRIMARY KEY (signal_id, day)
+);

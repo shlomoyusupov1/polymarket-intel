@@ -408,6 +408,91 @@ def size_calc(price: float, stop: float | None = None):
     return plans.size(s, price, stop)
 
 
+@app.get("/api/live/status")
+def live_status():
+    """Feeds, latest prices with their source time and age, and measured latency (source -> alert)."""
+    from . import live_detect as D
+    if not _has_table("live_prices"):
+        return {"feeds": {}, "prices": [], "latency": None, "running": False}
+    now = datetime.now(timezone.utc)
+    feeds = {r["feed"]: r for r in q("SELECT * FROM live_feeds")}
+    prices = q("SELECT * FROM live_prices ORDER BY cls, name")
+    for r in prices:
+        r["age_s"] = (now - r["recv_ts"]).total_seconds() if r["recv_ts"] else None
+        r["src_age_s"] = (now - r["src_ts"]).total_seconds() if r["src_ts"] else None
+        r["fresh"] = bool(r["fresh"] and r["age_s"] is not None and r["age_s"] <= D.STALE[r["cls"]])
+    rows = q("""SELECT extract(epoch FROM sent_at - src_ts) AS e2e, extract(epoch FROM detected_at - src_ts) AS det,
+                       status FROM live_alerts WHERE detected_at > now() - interval '7 days' AND src_ts IS NOT NULL""")
+    lat = {"alerts": D.latency_stats([float(r["e2e"]) for r in rows if r["e2e"] is not None]),
+           "detect": D.latency_stats([float(r["det"]) for r in rows if r["det"] is not None]),
+           "failed": sum(1 for r in rows if r["status"] == "failed"),
+           "pending": sum(1 for r in rows if r["status"] == "pending")}
+    running = any(f["updated_at"] and (now - f["updated_at"]).total_seconds() < 60 for f in feeds.values())
+    return {"feeds": feeds, "prices": prices, "latency": lat, "running": running, "now": now}
+
+
+@app.get("/api/live/alerts")
+def live_alerts(limit: int = Query(50, le=200)):
+    if not _has_table("live_alerts"):
+        return []
+    return q("""SELECT id, level, kind, asset, text, payload, src_ts, recv_ts, detected_at, sent_at, status
+                FROM live_alerts ORDER BY id DESC LIMIT %s""", (limit,))
+
+
+@app.get("/api/portfolio")
+def virtual_portfolio(scope: str = "all"):
+    """Paper account replayed from signals sealed before entry, under the owner's budget and risk profile."""
+    from . import lab_paper as LP, plans, portfolio as PF
+    from .cryptolab import CRYPTO
+    from .stocklab import STOCKS
+    if scope not in ("all", "validating", "confirmed"):
+        raise HTTPException(400, "scope must be all, validating or confirmed")
+    cols = ["id", "strategy", "symbol", "signal_day", "recorded_at", "sha256", "lab_verdict", "strategy_state", "hold",
+            "cost_rt", "status", "entry_day", "entry_price", "exit_day", "ret", "spy_ret", "excess", "last_price", "last_day"]
+    rows = q(f"SELECT {', '.join(cols)} FROM lab_signals ORDER BY id") if _has_table("lab_signals") else []
+    live = {}
+    if _has_table("live_prices"):
+        from . import live_detect as D
+        now = datetime.now(timezone.utc)
+        for lp in q("SELECT asset, cls, price, src_ts, recv_ts, fresh FROM live_prices"):
+            ok = lp["fresh"] and lp["recv_ts"] and (now - lp["recv_ts"]).total_seconds() <= D.STALE[lp["cls"]]
+            live[lp["asset"].split(":", 1)[1]] = (lp, bool(ok))
+    for r in rows:
+        m = CRYPTO if r["strategy"].startswith("crypto:") else STOCKS
+        r["sealed_ok"] = r["recorded_at"] < LP.deadline(str(r["signal_day"]), m)
+        lp = live.get(r["symbol"])
+        r["price_live"] = bool(lp and lp[1])
+        if lp and lp[1]:
+            r["last_price"], r["last_day"] = lp[0]["price"], lp[0]["src_ts"]
+    labs = {"": (lab_latest() or {}).get("result") or {}, "crypto:": (lab_latest("crypto") or {}).get("result") or {}}
+    labels = {pre + k: v.get("label", k) for pre, rep in labs.items() for k, v in (rep.get("strategies") or {}).items()}
+    with db.connect() as c:
+        s = plans.get_settings(c)
+    L = plans.limits(s)
+    # Eligibility is the strategy's state SEALED WITH THE SIGNAL (lab_paper.state_now), never a verdict
+    # reached later. Signals recorded before that field existed have no state and are not eligible.
+    wanted = {"validating": ("validating", "confirmed"), "confirmed": ("confirmed",)}.get(scope)
+    marks: dict = {}
+    if _has_table("lab_marks"):
+        for m in q("SELECT signal_id, day, close FROM lab_marks"):
+            marks.setdefault(m["signal_id"], {})[str(m["day"])] = m["close"]
+    # Position size = the profile's exposure cap: that is how a strategy is measured. Risk is reported
+    # separately (stress loss per plan card; live risk alerts when a paper loss exceeds risk_usd).
+    res = PF.replay(rows, L["budget"], L["max_position_usd"], L["max_open"],
+                    eligible_at_signal=(lambda r: r.get("strategy_state") in wanted) if wanted else None, marks=marks)
+    by_id = {r["id"]: r for r in rows}
+    for p in res["positions"]:
+        p["label"] = labels.get(p["strategy"], p["strategy"])
+        p["price_live"] = by_id.get(p["id"], {}).get("price_live", False)
+    counts = {k: sum(1 for r in rows if r.get("strategy_state") == k) for k in ("confirmed", "validating", "not_eligible")}
+    return {**res, "history": PF.history(rows, res["decisions"], labels)[:300],
+            "limits": L, "scope": scope, "position_cap_usd": L["max_position_usd"], "state_counts": counts,
+            "simulation_note": "התיק מחושב מחדש מהאיתותים לפי ההגדרות של היום — לא יומן החלטות נעול בזמן אמת.",
+            "risk_note": "אין עצירה בשיטות המעבדה, לכן כל פוזיציה יכולה להפסיד את כל הסכום. גודל הפוזיציה כאן הוא תקרת החשיפה "
+                         "בפרופיל, כדי למדוד את השיטה; הסיכון לעסקה מוצג בכרטיס העסקה (תרחיש קיצון) ובהתראות הסיכון.",
+            "decisions": None}
+
+
 def _opps():
     from . import plans
     perf = performance()
