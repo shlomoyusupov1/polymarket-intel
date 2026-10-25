@@ -131,7 +131,15 @@ class Monitor:
             cols = ["id", "strategy", "symbol", "signal_day", "recorded_at", "sha256", "lab_verdict", "hold", "cost_rt",
                     "status", "entry_day", "entry_price", "exit_day", "ret", "spy_ret", "excess", "last_price", "last_day"]
             rows = [dict(zip(cols, r)) for r in self.conn.execute(f"SELECT {', '.join(cols)} FROM lab_signals").fetchall()]
+            from . import lab_paper as LP
+            from .cryptolab import CRYPTO
+            from .stocklab import STOCKS
+            for row in rows:
+                m = CRYPTO if row["strategy"].startswith("crypto:") else STOCKS
+                row["sealed_ok"] = row["recorded_at"] < LP.deadline(str(row["signal_day"]), m)
             L = plans.limits(plans.get_settings(self.conn))
+            # same sizing as the portfolio page (exposure cap); the risk alert fires when a position's
+            # paper loss exceeds the owner's per-trade risk limit
             pf = PF.replay(rows, L["budget"], L["max_position_usd"], L["max_open"])
             self.risk_usd = L["risk_usd"]
             self.positions = {p["symbol"]: p for p in pf["positions"]}

@@ -73,9 +73,18 @@ def plan(lab: dict) -> dict[str, dict]:
     return out
 
 
+def state_now(hist_verdict: str | None, fwd: dict | None) -> str:
+    """The strategy's research state at this moment, as it will be sealed with the signal."""
+    if hist_verdict != "candidate_for_paper":
+        return "not_eligible"
+    return "confirmed" if fwd and fwd.get("status") == "confirmed" else "validating"
+
+
 def record_signals(conn, feats: dict, strategies: dict, now: datetime, m: L.Market = L.STOCKS) -> int:
     """Write today's signals. Returns how many new rows were sealed."""
     n = 0
+    closed = conn.execute("SELECT strategy, excess, entry_day FROM lab_signals WHERE status = 'closed'").fetchall()
+    fwd = summary(split(closed, m))
     for base, p in strategies.items():
         name = m.prefix + base
         hits = L.live_signals(base, feats, p["params"])
@@ -83,18 +92,19 @@ def record_signals(conn, feats: dict, strategies: dict, now: datetime, m: L.Mark
         if now >= deadline(last, m):
             log.warning("too late to record %s signals for %s", name, last)
             continue
+        state = state_now(p.get("verdict"), fwd.get(base))
         for sym in hits:
             open_ = conn.execute("SELECT 1 FROM lab_signals WHERE strategy = %s AND symbol = %s AND status IN ('pending', 'open')",
                                  (name, sym)).fetchone()
             if open_:
                 continue
             body = {"strategy": name, "params": p["params"], "hold": p["hold"], "symbol": sym, "signal_day": last,
-                    "recorded_at": now.isoformat()}
+                    "recorded_at": now.isoformat(), "strategy_state": state}
             sha = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
             cur = conn.execute("""INSERT INTO lab_signals (strategy, params, hold, symbol, signal_day, recorded_at, sha256,
-                                                           lab_verdict, cost_rt, status)
-                                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending') ON CONFLICT DO NOTHING""",
-                               (name, Jsonb(p["params"]), p["hold"], sym, last, now, sha, p.get("verdict"),
+                                                           lab_verdict, strategy_state, cost_rt, status)
+                                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending') ON CONFLICT DO NOTHING""",
+                               (name, Jsonb(p["params"]), p["hold"], sym, last, now, sha, p.get("verdict"), state,
                                 feats[sym]["cost"][-1]))
             n += cur.rowcount
     return n
@@ -122,6 +132,11 @@ def settle(conn, feats: dict, spy: list[dict], m: L.Market = L.STOCKS) -> int:
         rng = [(f["h"][j] - f["l"][j]) / f["c"][j] for j in range(max(0, k - 13), k + 1) if f["c"][j]]
         conn.execute("UPDATE lab_signals SET last_price = %s, last_day = %s, atr_pct = %s WHERE id = %s",
                      (f["c"][k], f["day"][k], sum(rng) / len(rng) if rng else None, rid))
+        # daily closes while the paper position is held (entry .. exit), for marked-to-market equity
+        e0 = i + 1 + m.lag
+        for j in range(e0, min(len(f["day"]), i + hold + m.lag + 1)):
+            conn.execute("INSERT INTO lab_marks (signal_id, day, close) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                         (rid, f["day"][j], f["c"][j]))
         e, x = i + 1 + m.lag, i + hold + m.lag
         if e >= len(f["day"]):
             continue

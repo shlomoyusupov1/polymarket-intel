@@ -365,3 +365,14 @@ CREATE TABLE IF NOT EXISTS live_alerts (
     status      text NOT NULL DEFAULT 'pending'   -- pending | sent | failed | suppressed
 );
 CREATE INDEX IF NOT EXISTS live_alerts_status_idx ON live_alerts (status, id);
+
+-- research state of the strategy AT THE MOMENT a signal was sealed (lab_paper.record_signals):
+-- confirmed (passed history + forward) | validating (passed history, forward under way) | not_eligible
+ALTER TABLE lab_signals ADD COLUMN IF NOT EXISTS strategy_state text;
+-- daily closing marks of every open paper position (lab_paper.settle), for a marked-to-market equity curve
+CREATE TABLE IF NOT EXISTS lab_marks (
+    signal_id bigint NOT NULL,
+    day       date NOT NULL,
+    close     double precision NOT NULL,
+    PRIMARY KEY (signal_id, day)
+);

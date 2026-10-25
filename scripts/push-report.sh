@@ -6,6 +6,8 @@
 #   .env:  REPORT_REPO=owner/pmintel-reports      (a private repo used only for these reports)
 #          REPORT_TOKEN=github_pat_...            (fine-grained token: that one repo, Contents read/write)
 #   install the hourly run:  bash scripts/install-report-push.sh
+#   The hourly report is the light one (scripts/evidence.sh --light). The backup/restore test runs once a day
+#   (04:10) into ~/.pmintel/security-latest.txt and only its PASS/FAIL lines are reported. Research is on demand.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 REPO=$(grep '^REPORT_REPO=' .env | cut -d= -f2-)
@@ -14,7 +16,7 @@ TOKEN=$(grep '^REPORT_TOKEN=' .env | cut -d= -f2-)
 STATE="${PMINTEL_STATE:-$HOME/.pmintel}"; mkdir -p "$STATE"
 OUT=$(mktemp)
 trap 'rm -f "$OUT" "$OUT.json"' EXIT
-bash scripts/evidence.sh > "$OUT" 2>&1
+bash scripts/evidence.sh --light > "$OUT" 2>&1   # light: database reads only, no restore test, no raw logs
 # never upload anything that looks like a secret from .env
 while IFS='=' read -r k v; do
   [ -n "$v" ] && [ ${#v} -ge 8 ] && case "$k" in *TOKEN*|*PASSWORD*|*HASH*|*KEY*|*SECRET*|TG_API_*|OFFSITE_PAR_URL)
@@ -40,6 +42,7 @@ PY
   curl -fsS -o /dev/null -X PUT -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
        "https://api.github.com/repos/$REPO/contents/$1" --data-binary "@$OUT.json"
 }
+find reports -name 'evidence-*.md' -mtime +7 -delete 2>/dev/null || true   # keep local copies one week
 TS=$(date -u +%Y-%m-%dT%H:%MZ)
 if put "latest.md" "report $TS"; then
   # one dated copy per day, for history
