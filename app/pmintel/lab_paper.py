@@ -36,7 +36,7 @@ from . import db, stocklab as L
 log = logging.getLogger("pmintel.lab_paper")
 NY = ZoneInfo("America/New_York")
 READY_AFTER = time(17, 15)
-GATE = {"min_n": 50, "win_rate": 0.60}
+GATE = {"min_n": 50}  # + a positive 95% lower bound on the mean result vs the benchmark after cost (net profit, not hit rate)
 
 
 def complete(bars: list[dict], now_ny: datetime, m: L.Market = L.STOCKS) -> list[dict]:
@@ -183,7 +183,7 @@ def summary(rows: list[tuple]) -> dict:
         n, k = len(xs), sum(1 for x in xs if x > 0)
         m, se = L.clustered_mean(xs, [L._week(d) for _, d in v])
         lo = _wilson_lo(k, n)
-        confirmed = n >= GATE["min_n"] and k / n >= GATE["win_rate"] and lo > 0.5 and se is not None and m - 1.96 * se > 0
+        confirmed = n >= GATE["min_n"] and se is not None and m - 1.96 * se > 0
         wins, losses = [x for x in xs if x > 0], [x for x in xs if x <= 0]
         days = sorted(d for _, d in v)
         out[name] = {"n": n, "success_rate": k / n, "success_lo95": lo, "mean_excess": m,

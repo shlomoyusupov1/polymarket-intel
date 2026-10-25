@@ -7,7 +7,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import config, db, hostmetrics, research
+from . import config, db, hostmetrics, pm_paper, research
 from .orderbook import summarize
 from .normalize import normalize_market
 from .sources import Clob, Gamma
@@ -112,6 +112,10 @@ def main() -> None:
             collect_orderbooks(conn, clob, out["records"], datetime.now(timezone.utc))
         except Exception:
             log.exception("collect failed")
+        try:
+            pm_paper.run_once(conn, clob)
+        except Exception:
+            log.exception("pm_paper failed")
         try:
             hostmetrics.record(conn)
         except Exception:

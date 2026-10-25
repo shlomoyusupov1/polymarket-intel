@@ -171,7 +171,7 @@ def leaderboard(conn) -> list[dict]:
 
 
 ROUND_TRIP_COST = 0.002  # used only when neither a range-based estimate nor an entry price exists
-GATE = {"min_n": 50, "win_rate": 0.60, "alpha": 0.05}
+GATE = {"min_n": 50, "alpha": 0.05}
 RULE = ("success = beat SPY over the same 5 trading days after the estimated round-trip cost of that stock "
         "(bid-ask spread from daily high/low + fees)")
 
@@ -198,8 +198,7 @@ def source_gate(rows: list[tuple]) -> dict:
 
     Success = beat SPY over the same 5 sessions after that stock's own round-trip cost. What decides
     whether a source makes money is the average edge, not the hit rate (60% small wins and 40% big
-    losses lose money), so 'reliable' needs ALL of: >= 50 measured tips; >= 60% success with a 95%
-    Wilson lower bound above 50%; a positive average edge whose 95% lower bound is above 0 when each
+    losses lose money), so 'reliable' needs ALL of: >= 50 measured tips; a positive average edge whose 95% lower bound is above 0 when each
     symbol counts once (one hyped stock posted 20 times can't carry a source); and, applied across
     all sources in apply_holm, an edge p-value that survives the Holm correction for testing many
     sources (with enough groups one will look good by luck)."""
@@ -223,12 +222,12 @@ def source_gate(rows: list[tuple]) -> dict:
     losses = [x for _, x, _c in m if x <= 0]
     win = k / n if n else None
     lo = _wilson_lo(k, n)
-    passes = bool(n >= GATE["min_n"] and win >= GATE["win_rate"] and lo > 0.5 and se and mean - 1.96 * se > 0)
+    passes = bool(n >= GATE["min_n"] and se and mean - 1.96 * se > 0)
     if n < 30:
         status = "collecting"
     elif passes:
         status = "reliable"  # may still be downgraded by apply_holm
-    elif win >= 0.55 and mean and mean > 0:
+    elif mean and mean > 0:
         status = "promising"
     else:
         status = "not_reliable"
