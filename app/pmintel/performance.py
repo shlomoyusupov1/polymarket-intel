@@ -29,7 +29,7 @@ from __future__ import annotations
 STATUSES = ("confirmed", "validating", "candidate", "failed", "insufficient")
 BENCH = {"stocks": "SPY", "crypto": "ביטקוין"}
 UNIT = {"stocks": "מניות", "crypto": "מטבעות"}
-LAB_GATE = "50+ עסקאות, גבול תחתון חיובי מעל קנייה אקראית, שורד תיקון Holm, 60%+ הצלחה שאינה מקרית"
+LAB_GATE = "50+ עסקאות, יתרון מוכח על קנייה אקראית ששורד תיקון Holm, רווח נטו מוכח מול המדד אחרי עלויות, חיובית ברוב השנים"
 
 
 def _e(**kw) -> dict:
@@ -56,8 +56,13 @@ def lab_missing(v: dict) -> list[str]:
         out.append("גבול תחתון חיובי מעל קנייה אקראית")
     if not (v.get("p_holm") is not None and v["p_holm"] < 0.05):
         out.append("שרידות בתיקון לבדיקת הרבה שיטות (Holm)")
-    if not ((v.get("success_rate") or 0) >= 0.60 and (v.get("success_lo95") or 0) > 0.5):
-        out.append("60%+ הצלחה שאינה מקרית")
+    c = v.get("gate_checks") or {}
+    if not c.get("net_profit_vs_bench", (v.get("mean_excess_lo95") or 0) > 0):
+        out.append("רווח נטו מוכח מול המדד אחרי עלויות (גבול תחתון חיובי)")
+    if c and not c.get("most_years_positive"):
+        out.append("חיובית ב-60% מהשנים לפחות")
+    if c and not c.get("survives_2x_cost", True):
+        out.append("נשארת ברווח גם בעלות כפולה")
     return out
 
 
@@ -90,7 +95,7 @@ def _lab_why(v: dict, bench: str = "SPY") -> str:
     if v.get("verdict") == "candidate_for_paper":
         return f"עברה על העבר מול {bench} וקנייה אקראית, ושרדה את התיקון. השערה בלבד עד שתוכח קדימה{side}"
     if v.get("verdict") == "edge_below_target":
-        return f"יש יתרון קטן מעל אקראי, אבל פחות מ-60% הצלחה{side}"
+        return f"יש יתרון על קנייה אקראית, אבל עוד לא רווח נטו מוכח מול המדד{side}"
     if (v.get("edge_lo95") or 0) > 0:
         return f"גבול תחתון חיובי, אבל לא שורד את התיקון לבדיקת הרבה שיטות{side}"
     return f"אין יתרון על קנייה אקראית אחרי עלויות{side}"
@@ -105,14 +110,12 @@ def from_lab_forward(summary: dict, lab_report: dict | None, engine: str = "stoc
         missing = []
         if v["n"] < 50:
             missing.append(f"50 עסקאות קדימה (יש {v['n']})")
-        if not (v["success_rate"] >= 0.60 and (v.get("success_lo95") or 0) > 0.5):
-            missing.append(f"60%+ ניצחו את {b}, שאינו מקרי")
         if not (v.get("mean_lo95") is not None and v["mean_lo95"] > 0):
-            missing.append("גבול תחתון חיובי לממוצע")
+            missing.append(f"רווח נטו מוכח מול {b} אחרי עלות (גבול תחתון חיובי)")
         if hist != "candidate_for_paper":
             missing.append("מעבר בבדיקה על העבר")
         if v["status"] == "confirmed" and hist == "candidate_for_paper":
-            status, why = "confirmed", f"עברה על העבר וגם קדימה: 50+ עסקאות, 60%+ ניצחו את {b} אחרי עלות. עדיין לא הבטחה לרווח"
+            status, why = "confirmed", f"עברה על העבר וגם קדימה: 50+ עסקאות ורווח נטו מוכח מול {b} אחרי עלות. עדיין לא הבטחה לרווח"
         elif v["status"] == "not_confirmed":
             status, why = "failed", "50+ עסקאות קדימה והשער לא הושג"
         else:
@@ -135,8 +138,8 @@ def from_tips(board: list[dict]) -> list[dict]:
         g = b.get("gate") or {}
         status = {"reliable": "confirmed", "promising": "validating", "not_reliable": "failed"}.get(g.get("status"), "insufficient")
         why = ("ירד בגלל התיקון לריבוי מקורות" if g.get("downgraded") else
-               {"confirmed": "50+ טיפים, 60%+ ניצחו את SPY אחרי עלות, שרד את התיקון. עדיין לא הבטחה לרווח",
-                "validating": "55%+ וחיובי עד עכשיו, עוד לא מוכח",
+               {"confirmed": "50+ טיפים, רווח נטו מוכח מול SPY אחרי עלות, שרד את התיקון. עדיין לא הבטחה לרווח",
+                "validating": "חיובי עד עכשיו, עוד לא מוכח",
                 "failed": "מפסיד ל-SPY אחרי עלויות",
                 "insufficient": f"{g.get('n') or 0} טיפים נמדדו (צריך 30 כדי לשפוט)"}[status])
         if g.get("downgraded"):
@@ -144,8 +147,8 @@ def from_tips(board: list[dict]) -> list[dict]:
         missing = []
         if (g.get("n") or 0) < 50:
             missing.append(f"50 טיפים (יש {g.get('n') or 0})")
-        if (g.get("success_rate") or 0) < 0.60:
-            missing.append("60%+ ניצחו את SPY")
+        if not ((g.get("edge_lo95") or 0) > 0):
+            missing.append("רווח נטו מוכח מול SPY (גבול תחתון חיובי)")
         out.append(_e(engine="sources", kind="measured", id=f"src:{b['source']}", label=b["source"],
                       version="tips gate", updated=b.get("last_tip"), data="Telegram / SEC / manual, Yahoo daily",
                       n=g.get("n"), clusters=g.get("symbols"), success=g.get("success_rate"),

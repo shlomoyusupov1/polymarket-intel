@@ -279,6 +279,20 @@ def research_latest():
     return rows[0] if rows else None
 
 
+@app.get("/api/pm_paper")
+def pm_paper_status():
+    """Forward execution check of the Polymarket study: paper entries at real asks (pm_paper.py)."""
+    from . import pm_paper as PP
+    with pool.connection() as c:
+        try:
+            s = PP.summary(c)
+        except Exception:  # noqa: BLE001 - table not created yet
+            return {"rules": {}, "markets_seen": 0, "last_recorded": None, "min_events": PP.MIN_EVENTS}
+        recent = c.execute("""SELECT recorded_at, question, rule, p, best_ask, vwap, fillable, status, won, ret_real, sha256
+                              FROM pm_paper WHERE rule <> 'none' ORDER BY id DESC LIMIT 30""").fetchall()
+    return {**s, "recent": recent}
+
+
 @app.get("/api/agents")
 def agents_room():
     """Every background job as a worker with a live status line (see agents.py)."""

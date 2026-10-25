@@ -8,7 +8,9 @@ strategy:
   * a symbol can't re-enter while a trade is open (no overlapping copies of the same bet);
   * walk-forward by calendar year: the parameters are chosen on all earlier years only, then scored
     on the next year; the out-of-sample (OOS) trades of every test year are pooled;
-  * success = beat SPY over the same sessions after cost (the owner's 60% target);
+  * a trade's result = its return minus SPY's over the same sessions, after cost. The gate is net
+    profit, not hit rate: a 44% strategy whose winners are twice its losers beats a 60% one whose
+    rare losses are large (owner's decision, 2026-10-25: "proven net profit" replaces "60% success");
   * because the universe is today's large companies (survivors), any long trade in it looks good
     against SPY. So every trade is also compared with the BASELINE: the average result of buying any
     stock of the universe on any day with the same hold, in the same year. A strategy is worth
@@ -46,7 +48,11 @@ BENCH = "SPY"
 HOLDS = (5, 10, 20)
 FIRST_TEST_YEARS = 3          # years of history before the first out-of-sample year
 MIN_TRAIN_TRADES = 30
-GATE = {"min_n": 50, "win_rate": 0.60, "alpha": 0.05}
+# Fixed before the results: >= 50 OOS trades; edge over random entry with a positive 95% lower bound that
+# survives Holm; the average result vs the benchmark after cost also has a positive 95% lower bound; and
+# the edge is positive in at least 60% of the test years (one lucky year can't carry it). For a market with
+# an assumed fixed cost (crypto) the benchmark result must stay positive at twice that cost.
+GATE = {"min_n": 50, "alpha": 0.05, "years_positive": 0.60, "min_year_n": 5}
 
 STRATEGIES = {
     "breakout_volume": {
@@ -488,15 +494,31 @@ def summarize(oos: list[dict]) -> dict:
             "by_year": {y: {"n": len(v), "edge_vs_baseline": sum(v) / len(v)} for y, v in sorted(years.items())}}
 
 
+def years_positive(s: dict) -> float | None:
+    ys = [v for v in (s.get("by_year") or {}).values() if v["n"] >= GATE["min_year_n"]]
+    return sum(1 for v in ys if v["edge_vs_baseline"] > 0) / len(ys) if ys else None
+
+
+def gate_checks(s: dict) -> dict[str, bool]:
+    """Each criterion of the gate, so the screen can say exactly what's missing."""
+    yp = years_positive(s)
+    return {"enough_trades": s["n"] >= GATE["min_n"],
+            "beats_random": s.get("edge_lo95") is not None and s["edge_lo95"] > 0,
+            "survives_holm": s.get("p_holm") is not None and s["p_holm"] < GATE["alpha"],
+            "net_profit_vs_bench": s.get("mean_excess_lo95") is not None and s["mean_excess_lo95"] > 0,
+            "most_years_positive": yp is not None and yp >= GATE["years_positive"],
+            "survives_2x_cost": s.get("lo95_at_2x_cost", 1.0) is None or s.get("lo95_at_2x_cost", 1.0) > 0}
+
+
 def verdict(s: dict) -> str:
     if s["n"] < GATE["min_n"]:
         return "insufficient_data"
-    edge = s["edge_lo95"] is not None and s["edge_lo95"] > 0 and s.get("p_holm") is not None and s["p_holm"] < GATE["alpha"]
-    if edge and s["success_rate"] >= GATE["win_rate"] and s["success_lo95"] > 0.5:
+    c = gate_checks(s)
+    if not (c["beats_random"] and c["survives_holm"]):
+        return "not_supported"
+    if c["net_profit_vs_bench"] and c["most_years_positive"] and c["survives_2x_cost"]:
         return "candidate_for_paper"
-    if edge:
-        return "edge_below_target"
-    return "not_supported"
+    return "edge_below_target"  # real edge over random entry, but not (yet) proven net profit
 
 
 # ---------------------------------------------------------------- walk-forward
@@ -560,13 +582,23 @@ def cost_sensitivity(oos: list[dict], s: dict, assumed: float) -> list[dict]:
     """Same trades re-scored at other fixed round-trip costs. The edge over random entry doesn't move
     (the random baseline pays the same cost); what moves is the result against the benchmark."""
     out = []
+    keys = [_week(t["entry"]) for t in oos]
     for c in COST_GRID:
         xs = [t["x"] + assumed - c for t in oos]
         n, k = len(xs), sum(1 for x in xs if x > 0)
-        v = {**s, "success_rate": k / n if n else None, "success_lo95": _wilson_lo(k, n) if n else None}
-        out.append({"cost": c, "success_rate": v["success_rate"], "mean_excess": sum(xs) / n if n else None,
-                    "verdict": verdict(v) if n else "insufficient_data"})
+        m, se = clustered_mean(xs, keys) if n else (None, None)
+        v = {**s, "success_rate": k / n if n else None, "success_lo95": _wilson_lo(k, n) if n else None,
+             "mean_excess": m, "mean_excess_lo95": (m - 1.96 * se) if se else None, "lo95_at_2x_cost": None}
+        out.append({"cost": c, "success_rate": v["success_rate"], "mean_excess": m,
+                    "mean_excess_lo95": v["mean_excess_lo95"], "verdict": verdict(v) if n else "insufficient_data"})
     return out
+
+
+def lo95_at_cost(oos: list[dict], assumed: float, cost: float) -> float | None:
+    if not oos:
+        return None
+    m, se = clustered_mean([t["x"] + assumed - cost for t in oos], [_week(t["entry"]) for t in oos])
+    return (m - 1.96 * se) if se else None
 
 
 def live_signals(name: str, feats: dict, params: dict) -> list[str]:
@@ -611,6 +643,10 @@ def run(conn=None, fetcher=fetch, symbols=None, pause: float = 0.4, m: Market = 
     ph = holm({k: v["p_edge"] for k, v in res.items()})
     for k, v in res.items():
         v["p_holm"] = ph[k]
+        if m.fixed_cost is not None:
+            v["lo95_at_2x_cost"] = lo95_at_cost(oos_by[k], m.fixed_cost, 2 * m.fixed_cost)
+        v["years_positive"] = years_positive(v)
+        v["gate_checks"] = gate_checks(v)
         v["verdict"] = verdict(v)
         if m.fixed_cost is not None:
             v["cost_sensitivity"] = cost_sensitivity(oos_by[k], v, m.fixed_cost)

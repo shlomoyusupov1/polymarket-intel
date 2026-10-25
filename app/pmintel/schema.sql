@@ -376,3 +376,33 @@ CREATE TABLE IF NOT EXISTS lab_marks (
     close     double precision NOT NULL,
     PRIMARY KEY (signal_id, day)
 );
+
+-- Polymarket execution check (pm_paper.py): paper entries at real order-book asks, sealed before the outcome
+CREATE TABLE IF NOT EXISTS pm_paper (
+    id               bigserial PRIMARY KEY,
+    market_id        text NOT NULL,
+    event_id         text,
+    category         text,
+    question         text,
+    rule             text NOT NULL,          -- research.STRATEGIES key, e.g. "NO 0.00-0.05"; 'none' = seen, no rule
+    side             text,
+    token_id         text,
+    recorded_at      timestamptz NOT NULL,
+    end_date         timestamptz,
+    p                double precision,       -- market price of the reference outcome (what the study used)
+    chosen           boolean NOT NULL DEFAULT false,  -- picked by the historical walk-forward at record time
+    best_ask         double precision,
+    best_bid         double precision,
+    vwap             double precision,       -- average price to buy the paper stake walking the asks
+    fillable         boolean NOT NULL DEFAULT false,
+    status           text NOT NULL,          -- open | unfillable | settled | void | skipped
+    sha256           text NOT NULL,
+    won              boolean,
+    ret_real         double precision,       -- per $1 at the real ask, after taker fee
+    ret_hist         double precision,       -- per $1 the way the historical study scores it (mid + slippage)
+    was_fillable     boolean,
+    resolved_outcome text,
+    settled_at       timestamptz,
+    UNIQUE (market_id, rule)
+);
+CREATE INDEX IF NOT EXISTS pm_paper_status ON pm_paper (status);
