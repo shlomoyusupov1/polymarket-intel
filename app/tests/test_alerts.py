@@ -60,3 +60,16 @@ def test_daily_digest_once_per_israel_day_and_built_from_data():
     t = A.digest_text(conn, later)
     assert t.startswith("☀️") and "trend +1.2%" in t and "SPY +0.4%" in t and "1 בעיות פתוחות — x נכשל" in t
     conn.close()
+
+
+def test_news_is_announced_once_and_only_the_highest_step():
+    f = {"pm_verdicts": {"24_scheduled": "not_supported"},
+         "pm_rules": {"NO 0.00-0.05": {"status": "collecting", "events": 12, "mean_real": 0.01}},
+         "fwd_closed": {"מניות": {"n": 12, "win": 0.5, "mean": 0.003}},
+         "lab_edge": [("ma_stack", "ערימת ממוצעים")]}
+    n = A.news(f)
+    assert "news:pm:24_scheduled:not_supported" in n and "news:fwd:מניות:10" in n and "news:fwd:מניות:1" not in n
+    assert "news:pmexec:NO 0.00-0.05:10" in n and "news:lab:ma_stack" in n
+    failed = A.news({"pm_rules": {"YES 0.90-0.95": {"status": "failed", "events": 40, "mean_real": -0.03}}})
+    assert "news:pmexec:failed:YES 0.90-0.95" in failed
+    assert "pmexec" in "".join(A.good_news({"pm_validated": ["NO 0.00-0.05"]}))
